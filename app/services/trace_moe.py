@@ -22,8 +22,7 @@ def search(image_bytes : bytes) -> list[dict]:
     data = resp.json()
 
     if data.get("error"):
-        raise RuntimeError(f"trace.moe error: {data["error"]}")
-        
+        raise RuntimeError(f"trace.moe error: {data['error']}")        
         #TODO return
     return [_clean_resp(res) for res in data.get("result", [])]
 
