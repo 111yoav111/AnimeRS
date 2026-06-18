@@ -1,4 +1,10 @@
 __pycache__/
 *.pyc
-.env
 venv/
+.venv/
+
+.env
+
+tests/*.jpg
+tests/*.png
+tests/*.jpeg
