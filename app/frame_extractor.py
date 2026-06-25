@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+import io
+import logging
+from pathlib import Path
+
+import imageio.v3 as iio
+from PIL import Image
+
+logger = logging.getLogger(__name__)
+
+_JPEG_QUALITY = 60
+
+_STILL_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif",
+}
+
+
+def _encode(img : Image.Image) -> bytes:
+    """
+    Convert PIL image to JPEG bytes.
+    """
+    buffer = io.BytesIO()
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGB")
+
+    img.save(buffer, format="JPEG", quality=_JPEG_QUALITY, optimize=True)
+
+    return buffer.getvalue()
+
+
+def _count_frames_for_duration(duration_sec : float) -> int:
+    """
+    Decide how many frames to extract based on video duration.
+
+    The longer the video -> more frames, capped at 40 frames to avoid diminishing returns.
+    """
+    if duration_sec < 30:
+        return 3
+    elif duration_sec < 120:  # 30 sec – 2 min
+        return 5
+    elif duration_sec < 600:  # 2 – 10 min
+        return 8
+    elif duration_sec < 1800: # 10 – 30 min
+        return 12
+    else:  # 30 min+
+        return 16
+
+
+def _is_image(path : Path) -> list[bytes]:
+    """
+    Read an image and return it as a 1-element list.
+    """
+    img = Image.open(path)
+    img.load()
+    logger.info("Image - 1 frame (%s)", path.name)
+
+    return [_encode(img)]
+
+
+def _from_video(path: Path) -> tuple[list[bytes], float]:
+    """
+    Handle videos - extract evenly-spread frames from a GIF or video.
+    First and last captured frames mark the timestamp range.
+    """
+    try:
+        md = iio.immeta(str(path))
+        fps = md.get("fps") or md.get("average_rate") or 25
+        duration_sec = md.get("duration") or 0
+        total_frames = int(duration_sec * fps) if duration_sec else None
+    except Exception:
+        fps = 25
+        duration_sec = 0
+        total_frames = None
+
+    # fallback - count frames manually if still no duration
+    if not duration_sec or not total_frames:
+        try:
+            total_frames = iio.improps(str(path)).n_images or 0
+            duration_sec = total_frames / fps if total_frames and fps else 0
+        except Exception:
+            total_frames = 0
+            duration_sec = 0
+
+    # final guard against inf/NaN
+    if not duration_sec or duration_sec != duration_sec or duration_sec == float('inf'):
+        duration_sec = 0
+        total_frames = 0
+
+    frames_to_give = _count_frames_for_duration(duration_sec)
+    # Calc skip - dynamic, based on vid duration
+    if total_frames and total_frames > frames_to_give:
+        skip = max(1, total_frames // frames_to_give)
+    else:
+        skip = 1
+    logger.info(
+        "Video duration: (%.1fs) | total_frames: (%d) | extracting (%d) frames | skip: (%d) | (%s)",
+        duration_sec, total_frames, frames_to_give, skip, path.name
+    )
+    frames: list[bytes] = []
+    for i, raw in enumerate(iio.imiter(str(path))):
+        if i % skip == 0:
+            try:
+                frames.append(_encode(Image.fromarray(raw)))
+                logger.debug("Added frame %d", i)
+            except Exception as exc:
+                logger.debug("Skipped frame %d: %s", i, exc)
+
+            if len(frames) >= frames_to_give:
+                break
+    return frames, duration_sec
+
+
+def extract_frames(path: str | Path) -> tuple[list[bytes], float]:
+    """
+    Extract JPEG-encoded frames from any image, GIF, or video.
+
+    Returns
+    -------
+    tuple[list[bytes], float]
+        - list[bytes] : frames, always at least 1 item
+        - float       : duration in seconds (0.0 for still images)
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Input file not found: {path}")
+    if path.suffix.lower() in _STILL_EXTENSIONS:
+        return _is_image(path), 0.0  # ← still image has no duration
+
+    frames, duration_sec = _from_video(path)
+    if not frames:
+        logger.warning("No frames captured, retrying as image (%s)", path.name)
+        return _is_image(path), 0.0
+
+    return frames, duration_sec
