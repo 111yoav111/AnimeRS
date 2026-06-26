@@ -11,7 +11,7 @@ def get_quota() -> dict:
         quota - total daily searches allowed
         quota_used - searches used in the last 24 hours (rolling window)
         quota_left - quota - quota_used
-        low_quota - True if remaining <= QUOTA_LOW_THRESHOL
+        low_quota - True if remaining <= QUOTA_LOW_THRESHOLD
     """
     headers = {}
     # If having an API key - have more searches 
