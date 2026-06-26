@@ -1,5 +1,6 @@
 import asyncio
 import tempfile
+import threading
 
 from pathlib import Path
 
@@ -16,6 +17,7 @@ app = FastAPI(title="AnimeRS")
 
 #  search counter - resets when the server restarts.
 _search_count = 0
+_search_lock = threading.Lock()
 
 
 def _add_search_counter(result: dict) -> dict:
@@ -23,10 +25,12 @@ def _add_search_counter(result: dict) -> dict:
     Increment the search counter and send a quota reminder every QUOTA_WARN_EVERY searches.
     """
     global _search_count
-    _search_count += 1
-    if _search_count % config.QUOTA_WARN_EVERY == 0:
+    with _search_lock:
+        _search_count += 1
+        count = _search_count
+    if count % config.QUOTA_WARN_EVERY == 0:
         result["quota_reminder"] = (
-            f"You've made {_search_count} searches this session. "
+            f"You've made {count} searches this session. "
         )
     return result
 
