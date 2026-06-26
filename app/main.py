@@ -9,12 +9,43 @@ from fastapi.responses import JSONResponse
 import consensus
 import frame_extractor
 import paste
+import config
+from services import quota
 
 app = FastAPI(title="AnimeRS")
+
+#  search counter - resets when the server restarts.
+_search_count = 0
+
+
+def _add_search_counter(result: dict) -> dict:
+    """
+    Increment the search counter and send a quota reminder every QUOTA_WARN_EVERY searches.
+    """
+    global _search_count
+    _search_count += 1
+    if _search_count % config.QUOTA_WARN_EVERY == 0:
+        result["quota_reminder"] = (
+            f"You've made {_search_count} searches this session. "
+        )
+    return result
+
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.get("/quota")
+async def get_quota():
+    """
+    Return current trace.moe quota status (from /me).
+    """
+    try:
+        return await asyncio.to_thread(quota.get_quota)
+    except RuntimeError as exc:
+        return JSONResponse(status_code=502, content={"error": str(exc)})
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": f"Unexpected error: {exc}"})
 
 @app.post("/search")
 async def search(image: UploadFile = File(...)):
@@ -33,7 +64,7 @@ async def search(image: UploadFile = File(...)):
             return consensus.build_verdict(frames, duration_sec)
         result = await asyncio.to_thread(run)
 
-        return result
+        return _add_search_counter(result)
     
     except RuntimeError as exc:
         return JSONResponse(status_code=502, content={"error": str(exc)})
@@ -56,7 +87,7 @@ async def search_paste():
             frames, duration_sec = frame_extractor.extract_frames(tmp_path)
             return consensus.build_verdict(frames, duration_sec)
         result = await asyncio.to_thread(run)
-        return result
+        return _add_search_counter(result)
     except NotImplementedError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     except RuntimeError as e:
