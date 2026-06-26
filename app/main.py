@@ -55,6 +55,7 @@ async def search(image: UploadFile = File(...)):
     suffix = Path(image.filename).suffix
     if not suffix:
         return JSONResponse(status_code=400, content={"error": "Cannot determine file type from file name."})
+    tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(file_bytes)
@@ -71,16 +72,18 @@ async def search(image: UploadFile = File(...)):
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": f"Unexpected error: {exc}"})
     finally:
-        try:
-            tmp_path.unlink()
-        except Exception:
-            pass
+        if tmp_path:
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
 
 @app.post("/search/paste")
 async def search_paste():
     """
     Grab the current clipboard image and run a search.
     """
+    tmp_path = None
     try:
         tmp_path = paste.grab()
         def run():
@@ -95,7 +98,8 @@ async def search_paste():
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Error: {e}"})
     finally:
-        try:
-            tmp_path.unlink()
-        except Exception:
-            pass
+        if tmp_path:
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
