@@ -25,13 +25,13 @@ def get_quota() -> dict:
     )
     resp.raise_for_status()
     data = resp.json()
-    print(data)
 
     quota = data.get("quota")
-    quota_used = int(data.get("quotaUsed"))
+    quota_used = data.get("quotaUsed")
 
     if quota is None or quota_used is None:
         raise RuntimeError(f"Error with /me response: {data}")
+    quota_used = int(quota_used)
     
     quota_left = quota - quota_used
 
