@@ -89,6 +89,7 @@ def build_verdict(frames: list[bytes], duration_sec: float = 0.0) -> dict:
         try:
             results = trace_moe.search(frame)
             all_results.append(results)
+            logger.debug("Frame %d - %d matches", i, len(results))
         except Exception as exc:
             logger.warning("Frame %d failed: %s", i, exc)
             all_results.append([])

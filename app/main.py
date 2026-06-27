@@ -107,7 +107,8 @@ async def search_paste():
                 tmp_path.unlink()
             except Exception:
                 pass
-            
+
+
 # Open the UI from here 
 # Run python main.py to launch app.
 # Run uvicorn main:app --reload to start the API server only.
@@ -123,3 +124,4 @@ if __name__ == "__main__":
     window.show()
 
     sys.exit(qt_app.exec())
+    
