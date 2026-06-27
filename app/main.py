@@ -107,3 +107,19 @@ async def search_paste():
                 tmp_path.unlink()
             except Exception:
                 pass
+            
+# Open the UI from here 
+# Run python main.py to launch app.
+# Run uvicorn main:app --reload to start the API server only.
+if __name__ == "__main__":
+    import sys
+    from PyQt6.QtWidgets import QApplication
+    from ui.main_window import MainWindow
+
+    qt_app = QApplication(sys.argv)
+    qt_app.setStyle("Fusion")
+
+    window = MainWindow()
+    window.show()
+
+    sys.exit(qt_app.exec())

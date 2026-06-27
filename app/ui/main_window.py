@@ -1,16 +1,17 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QStackedWidget,
-    QHBoxLayout, QVBoxLayout, QLabel
+    QHBoxLayout, QVBoxLayout, QLabel, QMessageBox
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
 
 from ui.theme import (
     BG_APP, DOT_RED, DOT_YELLOW, DOT_GREEN,
     WINDOW_WIDTH, WINDOW_HEIGHT,
     titlebar_style, app_style, credit_style,
-    TEXT_GHOST, FONT_XS
 )
+from ui.upload_screen import UploadScreen
+from ui.result_screen import ResultScreen
+from ui.search_worker import SearchWorker
 
 
 class MainWindow(QMainWindow):
@@ -20,6 +21,9 @@ class MainWindow(QMainWindow):
         self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setStyleSheet(app_style())
 
+        self._current_filename = ""
+        self._worker = None
+
         root = QWidget()
         root.setObjectName("central")
         self.setCentralWidget(root)
@@ -28,6 +32,7 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
+        # Titlebar 
         titlebar = QWidget()
         titlebar.setObjectName("titlebar")
         titlebar.setFixedHeight(44)
@@ -63,9 +68,18 @@ class MainWindow(QMainWindow):
 
         root_layout.addWidget(titlebar)
 
+        # Screens
         self.stack = QStackedWidget()
+
+        self._upload_screen = UploadScreen()
+        self._result_screen = ResultScreen()
+
+        self.stack.addWidget(self._upload_screen)  # index 0
+        self.stack.addWidget(self._result_screen)  # index 1
+
         root_layout.addWidget(self.stack, stretch=1)
 
+        # Dev by
         credit_bar = QWidget()
         credit_bar.setStyleSheet(f"background: {BG_APP};")
         credit_layout = QHBoxLayout(credit_bar)
@@ -76,6 +90,58 @@ class MainWindow(QMainWindow):
         credit_layout.addWidget(credit_label, alignment=Qt.AlignmentFlag.AlignLeft)
 
         root_layout.addWidget(credit_bar)
+
+        # Signals - output
+        self._upload_screen.file_selected.connect(self._on_file_selected)
+        self._result_screen.go_back.connect(self._on_go_back)
+
+    # Slots 
+
+    def _on_file_selected(self, path: str) -> None:
+        """
+        User picked a file (drop / browse / Ctrl+V).
+
+        call to the worker and show a waiting state.
+        """
+        self._current_filename = path.split("/")[-1].split("\\")[-1] if path else ""
+
+        # Show a single pulsing dot while we wait for the backend
+        self._upload_screen.start_progress(1)
+        self._upload_screen._frame_dots[0].setStyleSheet(
+            __import__('ui.theme', fromlist=['theme']).frame_dot_style("active")
+        )
+
+        self._worker = SearchWorker(file_path=path)
+        self._worker.finished.connect(self._on_search_finished)
+        self._worker.error.connect(self._on_search_error)
+        self._worker.start()
+
+    def _on_search_finished(self, verdict: dict) -> None:
+        """
+        Worker finished - populate result screen and switch to it.
+        """
+        # the real frame count, update the dots to reflect it
+        frames_total = verdict.get("frames_total", 1)
+        self._upload_screen.start_progress(frames_total)
+        for i in range(frames_total):
+            self._upload_screen.update_progress(i)
+
+        self._result_screen.show_result(verdict, self._current_filename)
+        self.show_screen(1)
+
+    def _on_search_error(self, message: str) -> None:
+        """
+        Worker hit an error - show a message box, reset upload screen.
+        """
+        self._upload_screen.reset()
+        QMessageBox.critical(self, "Search failed", message)
+
+    def _on_go_back(self) -> None:
+        """
+        User clicked back / try again - reset and go to upload screen.
+        """
+        self._upload_screen.reset()
+        self.show_screen(0)
 
     def show_screen(self, index: int) -> None:
         """
