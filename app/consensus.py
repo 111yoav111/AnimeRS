@@ -93,7 +93,8 @@ def build_verdict(frames: list[bytes], duration_sec: float = 0.0) -> dict:
         except Exception as exc:
             logger.warning("Frame %d failed: %s", i, exc)
             all_results.append([])
-        time.sleep(1)
+        if i < len(frames) - 1:  # no need to sleep after last frame
+            time.sleep(1)
 
     vote_result = _vote(all_results)
 
