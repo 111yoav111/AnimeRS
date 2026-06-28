@@ -87,19 +87,23 @@ class UploadScreen(QWidget):
         # Divider
         divider = QHBoxLayout()
         divider.setSpacing(12)
+        divider.setContentsMargins(0, 0, 0, 0)
 
-        left_line = QFrame()
-        left_line.setFrameShape(QFrame.Shape.HLine)
-        left_line.setStyleSheet(f"color: {theme.BORDER_SUBTLE};")
+        left_line = QWidget()
+        left_line.setFixedHeight(1)
+        left_line.setStyleSheet(f"background: {theme.BORDER_SUBTLE};")
+        left_line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         divider.addWidget(left_line)
 
         or_label = QLabel("or")
         or_label.setStyleSheet(f"color: {theme.TEXT_GHOST}; font-size: {theme.FONT_SM}px;")
+        or_label.setContentsMargins(4, 0, 4, 0)
         divider.addWidget(or_label)
 
-        right_line = QFrame()
-        right_line.setFrameShape(QFrame.Shape.HLine)
-        right_line.setStyleSheet(f"color: {theme.BORDER_SUBTLE};")
+        right_line = QWidget()
+        right_line.setFixedHeight(1)
+        right_line.setStyleSheet(f"background: {theme.BORDER_SUBTLE};")
+        right_line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         divider.addWidget(right_line)
 
         layout.addLayout(divider)

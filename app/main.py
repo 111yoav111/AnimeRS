@@ -34,7 +34,6 @@ def _add_search_counter(result: dict) -> dict:
         )
     return result
 
-app = FastAPI(title="AnimeRS")
 
 @app.get("/health")
 def health():
