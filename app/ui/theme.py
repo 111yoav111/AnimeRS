@@ -238,7 +238,7 @@ def confidence_badge_style(high: bool = True) -> str:
         QLabel {{
             background: {bg};
             border: 1px solid {border};
-            border-radius: {RADIUS_PILL}px;
+            border-radius: {RADIUS_APP}px;
             padding: 3px 10px;
             font-size: {FONT_XS}px;
             color: {color};

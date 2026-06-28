@@ -1,3 +1,4 @@
+#TODO: FIX WHEN API RETURNS NONE OF NAME, GO FOR THE OTHER POSABILITIES
 import logging
 from collections import defaultdict
 import time
@@ -32,6 +33,8 @@ def _vote(results: list[list[dict]]) -> tuple[str, list[dict]] | None:
             continue
         best = max(frame_results, key=lambda m: m["similarity%"])
         animelist_id = best.get("animelist_id")
+        #if animelist_id is None:
+            #animelist_id = best.get("romaji")
         if animelist_id and animelist_id != "Unknown":
             best_match[animelist_id].append(best)
 

@@ -2,7 +2,7 @@ import httpx
 import os
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-IMG_PATH = os.path.join(SCRIPT_DIR, "test2.jpeg")  
+IMG_PATH = os.path.join(SCRIPT_DIR, "1197817.png")  
 
 with open(IMG_PATH, "rb") as f:
     files = {"image": f}        
