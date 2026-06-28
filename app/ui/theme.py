@@ -9,13 +9,13 @@ All UI files import from here - nothing is hardcoded elsewhere.
 BG_APP        = "#0d0d0f"   # main window / titlebar
 BG_SURFACE    = "#111115"   # drop zone, result card
 BG_SURFACE_2  = "#141418"   # result hero section
-BG_ELEVATED   = "#1a1a22"   # pills, browse btn, frame dots, stat boxes
+BG_ELEVATED   = "#1a1a22"   # browse btn, frame dots, stat boxes
 BG_ELEVATED_2 = "#13131a"   # drop zone hover, active frame dot bg
 BG_HOVER      = "#222230"   # button hover
  
 # Borders
 BORDER_SUBTLE  = "#1e1e24"  # app border, titlebar separator, card border
-BORDER_DEFAULT = "#2a2a35"  # pills, browse btn, frame dots
+BORDER_DEFAULT = "#2a2a35"  # browse btn, frame dots
 BORDER_ACCENT  = "#7F77DD"  # drop zone hover, progress, frame dot done/active
  
 # Accent — purple
@@ -68,7 +68,6 @@ WINDOW_HEIGHT = 620
 RADIUS_APP     = 16
 RADIUS_CARD    = 16
 RADIUS_BTN     = 8
-RADIUS_PILL    = 20
 RADIUS_STAT    = 10
 RADIUS_DOT_BTN = 6   # frame dots
  
@@ -124,18 +123,6 @@ def drop_zone_style(hover: bool = False) -> str:
             background: {bg};
             border: 2px dashed {border_color};
             border-radius: {RADIUS_CARD}px;
-        }}
-    """
- 
-def pill_style() -> str:
-    return f"""
-        QLabel {{
-            background: {BG_ELEVATED};
-            border: 1px solid {BORDER_DEFAULT};
-            border-radius: {RADIUS_PILL}px;
-            padding: 4px 12px;
-            font-size: {FONT_SM}px;
-            color: {TEXT_GHOST};
         }}
     """
  
@@ -302,4 +289,3 @@ def credit_style() -> str:
             font-size: {FONT_XS}px;
         }}
     """
- 

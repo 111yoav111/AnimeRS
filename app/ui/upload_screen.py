@@ -80,17 +80,6 @@ class UploadScreen(QWidget):
         drop_sub.setStyleSheet(f"color: {theme.TEXT_FAINT}; font-size: {theme.FONT_SM}px;")
         dz_layout.addWidget(drop_sub)
 
-        # Format pills
-        pills_row = QHBoxLayout()
-        pills_row.setSpacing(6)
-        pills_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        for fmt in ("JPG", "PNG", "GIF", "MP4", "MKV", "WEBM"):
-            pill = QLabel(fmt)
-            pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            pill.setStyleSheet(theme.pill_style())
-            pills_row.addWidget(pill)
-        dz_layout.addLayout(pills_row)
-
         layout.addWidget(self._drop_zone)
 
         layout.addSpacing(16)
@@ -250,3 +239,4 @@ class UploadScreen(QWidget):
         self._progress_bar.setValue(0)
         self._frame_dots.clear()
         self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False))
+        
