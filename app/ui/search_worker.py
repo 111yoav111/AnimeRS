@@ -38,6 +38,7 @@ class SearchWorker(QThread):
     def run(self) -> None:
         """
         Called automatically by QThread.start().
+        
         Runs in the background thread - never call directly.
         """
         try:
@@ -45,6 +46,11 @@ class SearchWorker(QThread):
                 verdict = self._search_paste()
             else:
                 verdict = self._search_file(self._file_path)
+
+            # Every N searches the backend pop quota_reminder.
+            # On those searches also check /quota for low quota warning.
+            if verdict.get("quota_reminder"):
+                self._check_low_quota(verdict)
 
             self.finished.emit(verdict)
 
@@ -60,6 +66,27 @@ class SearchWorker(QThread):
             self.error.emit(f"Server returned an error: {exc.response.status_code}")
         except Exception as exc:
             self.error.emit(f"Error: {exc}")
+
+    def _check_low_quota(self, verdict: dict) -> None:
+        """
+        Call GET /quota and pop a low_quota_warning into the verdict if running low.
+
+        Only called every N searches - when quota_reminder is present.
+        """
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(f"{_API_BASE}/quota")
+                resp.raise_for_status()
+                quota_data = resp.json()
+
+            if quota_data.get("low_quota"):
+                remaining = quota_data.get("remaining", 0)
+                verdict["quota_low_warning"] = (
+                    f"Only {remaining} searches remaining today."
+                )
+        except Exception:
+            # If quota check fails, just skip it
+            pass
 
     def _search_file(self, path: str) -> dict:
         with open(path, "rb") as f:

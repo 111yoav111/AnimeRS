@@ -186,6 +186,15 @@ class ResultScreen(QWidget):
         self._quota_reminder.setVisible(False)
         layout.addWidget(self._quota_reminder)
 
+        layout.addSpacing(4)
+
+        # Low quota warning (hidden until remaining searches drop low)
+        self._quota_low_warning = QLabel("")
+        self._quota_low_warning.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._quota_low_warning.setStyleSheet(f"color: {theme.CONFIDENCE_LOW_TEXT}; font-size: {theme.FONT_XS}px; font-weight: 600;")
+        self._quota_low_warning.setVisible(False)
+        layout.addWidget(self._quota_low_warning)
+
         layout.addSpacing(6)
 
         # Try again btn
@@ -207,6 +216,7 @@ class ResultScreen(QWidget):
             self._card.setVisible(False)
             self._no_match.setVisible(True)
             self._quota_reminder.setVisible(False)
+            self._quota_low_warning.setVisible(False) 
             return
 
         self._card.setVisible(True)
@@ -282,6 +292,14 @@ class ResultScreen(QWidget):
             self._quota_reminder.setVisible(True)
         else:
             self._quota_reminder.setVisible(False)
+
+        # Low quota warning - shown when remaining searches drop low
+        low_warning = verdict.get("quota_low_warning")
+        if low_warning:
+            self._quota_low_warning.setText(f"⚠ {low_warning}")
+            self._quota_low_warning.setVisible(True)
+        else:
+            self._quota_low_warning.setVisible(False)
 
     # -----helpers-----------
 
