@@ -58,9 +58,9 @@ def _clean_resp(anw: dict) -> dict:
     title = anime_list.get("title") or {}
 
     return {
-        "English Title": title.get("english") or "Unknown",
-        "Romaji": title.get("romaji")  or "Unknown",
-        "Native Title": title.get("native")  or "Unknown",
+        "English Title": title.get("english") or None,
+        "Romaji": title.get("romaji")  or None,
+        "Native Title": title.get("native")  or None,
         "Episode": anw.get("episode") or None,
         "Timestamp": _fmt_timestamp(anw.get("from")),
         "similarity%": int((anw.get("similarity") or 0) * 100),
