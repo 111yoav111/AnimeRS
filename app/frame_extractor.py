@@ -33,7 +33,7 @@ def _count_frames_for_duration(duration_sec : float) -> int:
     """
     Decide how many frames to extract based on video duration.
 
-    The longer the video -> more frames, capped at 40 frames to avoid diminishing returns.
+    The longer the video -> more frames, capped at 16 frames to avoid diminishing returns.
     """
     if duration_sec < 30:
         return 3
@@ -58,10 +58,12 @@ def _is_image(path : Path) -> list[bytes]:
     return [_encode(img)]
 
 
-def _from_video(path: Path) -> tuple[list[bytes], float]:
+def _from_video(path: Path, max_frames: int | None = None) -> tuple[list[bytes], float]:
     """
     Handle videos - extract evenly-spread frames from a GIF or video.
     First and last captured frames mark the timestamp range.
+
+    max_frames: user-selected frame count. None = use dynamic logic.
     """
     try:
         md = iio.immeta(str(path))
@@ -87,7 +89,12 @@ def _from_video(path: Path) -> tuple[list[bytes], float]:
         duration_sec = 0
         total_frames = 0
 
-    frames_to_give = _count_frames_for_duration(duration_sec)
+    # user override takes priority, otherwise dynamic logic
+    if max_frames is not None:
+        frames_to_give = max_frames
+    else:
+        frames_to_give = _count_frames_for_duration(duration_sec)
+
     # Calc skip - dynamic, based on vid duration
     if total_frames and total_frames > frames_to_give:
         skip = max(1, total_frames // frames_to_give)
@@ -111,9 +118,15 @@ def _from_video(path: Path) -> tuple[list[bytes], float]:
     return frames, duration_sec
 
 
-def extract_frames(path: str | Path) -> tuple[list[bytes], float]:
+def extract_frames(path: str | Path, max_frames: int | None = None) -> tuple[list[bytes], float]:
     """
     Extract JPEG-encoded frames from any image, GIF, or video.
+
+    Parameters
+    ----------
+    max_frames : int | None
+        User-selected frame count (1-16). None = auto (dynamic based on duration).
+        Ignored for images - always 1 frame.
 
     Returns
     -------
@@ -127,7 +140,7 @@ def extract_frames(path: str | Path) -> tuple[list[bytes], float]:
     if path.suffix.lower() in _STILL_EXTENSIONS:
         return _is_image(path), 0.0  # ← still image has no duration
 
-    frames, duration_sec = _from_video(path)
+    frames, duration_sec = _from_video(path, max_frames=max_frames)
     if not frames:
         logger.warning("No frames captured, retrying as image (%s)", path.name)
         return _is_image(path), 0.0

@@ -10,3 +10,6 @@ CONFIDENT_THRESHOLD = 95  # if trace.moe have x>95% simillarty - dont ask other 
 # Quota
 QUOTA_LOW_THRESHOLD = 10  # warn user when remaining searches drop to this level
 QUOTA_WARN_EVERY = 10  # tell user to check /quota every n searchs
+
+# Frame 
+MAX_FRAMES_LIMIT = 16 # cap on user selected frame count (1-16)

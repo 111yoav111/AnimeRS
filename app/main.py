@@ -1,10 +1,11 @@
 import asyncio
 import tempfile
 import threading
+from typing import Optional
 
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 
 import consensus
@@ -52,20 +53,28 @@ async def get_quota():
         return JSONResponse(status_code=500, content={"error": f"Unexpected error: {exc}"})
 
 @app.post("/search")
-async def search(image: UploadFile = File(...)):
+async def search(
+    image: UploadFile = File(...),
+    max_frames: Optional[int] = Form(None),  # None = auto, 1-16 = user override
+):
     file_bytes = await image.read()
     if not image.filename:
         return JSONResponse(status_code=400, content={"error": "File has no name, cannot determine type."})
     suffix = Path(image.filename).suffix
     if not suffix:
         return JSONResponse(status_code=400, content={"error": "Cannot determine file type from file name."})
+
+    # clamp to valid range if user provided a value
+    if max_frames is not None:
+        max_frames = max(1, min(max_frames, config.MAX_FRAMES_LIMIT))
+
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(file_bytes)
             tmp_path = Path(tmp.name)
         def run():
-            frames, duration_sec = frame_extractor.extract_frames(tmp_path)
+            frames, duration_sec = frame_extractor.extract_frames(tmp_path, max_frames=max_frames)
             return consensus.build_verdict(frames, duration_sec)
         result = await asyncio.to_thread(run)
 
