@@ -35,7 +35,6 @@ class ResultScreen(QWidget):
         card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(0)
 
-    
         result_top = QFrame()
         result_top.setObjectName("result_hero")
         result_top.setStyleSheet(f"""
@@ -113,23 +112,23 @@ class ResultScreen(QWidget):
         hero_layout.addWidget(meta)
         card_layout.addWidget(result_top)
 
-        # Stats section 
+        # Stats section
         stats_widget = QWidget()
         stats_widget.setStyleSheet(f"background: {theme.BG_SURFACE};")
         stats_layout = QHBoxLayout(stats_widget)
         stats_layout.setContentsMargins(18, 14, 18, 14)
         stats_layout.setSpacing(10)
 
-        self._stat_similarity  = self._make_stat("Similarity",     "-", "avg across frames")
-        self._stat_frames      = self._make_stat("Frames agreed",  "-", "consensus vote")
-        self._stat_input       = self._make_stat("Input type",     "-", "")
+        self._stat_similarity  = self._make_stat("Similarity",    "-", "avg across frames")
+        self._stat_frames      = self._make_stat("Frames agreed", "-", "consensus vote")
+        self._stat_input       = self._make_stat("Input type",    "-", "")
 
         for stat in (self._stat_similarity, self._stat_frames, self._stat_input):
             stats_layout.addWidget(stat)
 
         card_layout.addWidget(stats_widget)
 
-        # Similarity bar 
+        # Similarity bar
         sim_widget = QWidget()
         sim_widget.setStyleSheet(f"background: {theme.BG_SURFACE};")
         sim_layout = QVBoxLayout(sim_widget)
@@ -165,7 +164,7 @@ class ResultScreen(QWidget):
 
         layout.addSpacing(14)
 
-        # No match label (hidden by default) 
+        # No match label (hidden by default)
         self._no_match = QLabel("No match found.\ntrace.moe couldn't identify this file.")
         self._no_match.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._no_match.setStyleSheet(f"""
@@ -177,6 +176,17 @@ class ResultScreen(QWidget):
         """)
         self._no_match.setVisible(False)
         layout.addWidget(self._no_match)
+
+        layout.addSpacing(6)
+
+        # Quota reminder (hidden until triggered every N searches)
+        self._quota_reminder = QLabel("")
+        self._quota_reminder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._quota_reminder.setStyleSheet(f"color: {theme.CONFIDENCE_LOW_TEXT}; font-size: {theme.FONT_XS}px;")
+        self._quota_reminder.setVisible(False)
+        layout.addWidget(self._quota_reminder)
+
+        layout.addSpacing(6)
 
         # Try again btn
         try_again = QPushButton("↺  Try another file")
@@ -196,6 +206,7 @@ class ResultScreen(QWidget):
         if not verdict.get("found"):
             self._card.setVisible(False)
             self._no_match.setVisible(True)
+            self._quota_reminder.setVisible(False)
             return
 
         self._card.setVisible(True)
@@ -215,7 +226,7 @@ class ResultScreen(QWidget):
             "Unknown"
         )
         self._title_label.setText(title)
-        self._title_label.setToolTip(title)  # full title on hover if truncated
+        self._title_label.setToolTip(title)
 
         native = verdict.get("Native Title", "")
         self._native_label.setText(native if native and native != "Unknown" else "")
@@ -264,6 +275,13 @@ class ResultScreen(QWidget):
         self._sim_bar.setValue(similarity)
         self._sim_pct.setText(f"{similarity}%")
 
+        # Quota reminder - shown every N searches when backend send it
+        quota_reminder = verdict.get("quota_reminder")
+        if quota_reminder:
+            self._quota_reminder.setText(f"🔔 {quota_reminder.strip()}")
+            self._quota_reminder.setVisible(True)
+        else:
+            self._quota_reminder.setVisible(False)
 
     # -----helpers-----------
 
