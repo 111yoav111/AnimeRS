@@ -289,3 +289,20 @@ def credit_style() -> str:
             font-size: {FONT_XS}px;
         }}
     """
+
+def search_btn_style() -> str:
+    return f"""
+        QPushButton {{
+            background: {ACCENT};
+            border: none;
+            border-radius: {RADIUS_BTN}px;
+            padding: 10px 28px;
+            color: {BG_APP};
+            font-size: {FONT_BASE}px;
+            font-weight: 600;
+        }}
+        QPushButton:hover {{
+            background: #9890e8;
+            color: {BG_APP};
+        }}
+    """
