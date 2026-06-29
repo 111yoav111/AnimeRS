@@ -8,7 +8,6 @@ from ui.theme import (
     BG_APP, DOT_RED, DOT_YELLOW, DOT_GREEN,
     WINDOW_WIDTH, WINDOW_HEIGHT,
     titlebar_style, app_style, credit_style,
-    frame_dot_style,
 )
 from ui.upload_screen import UploadScreen
 from ui.result_screen import ResultScreen
@@ -105,9 +104,8 @@ class MainWindow(QMainWindow):
         """
         self._current_filename = path.split("/")[-1].split("\\")[-1] if path else ""
 
-        # Show a single pulsing dot while we wait for the backend
+        # Show analyzing state while we wait for the backend
         self._upload_screen.start_progress(1)
-        self._upload_screen._frame_dots[0].setStyleSheet(frame_dot_style("active"))
 
         self._worker = SearchWorker(file_path=path, max_frames=max_frames)
         self._worker.finished.connect(self._on_search_finished)

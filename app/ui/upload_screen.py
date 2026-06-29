@@ -36,7 +36,7 @@ class FramePickerDialog(QDialog):
         layout.setSpacing(12)
 
         label = QLabel("How many frames to extract?")
-        label.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_BASE}px;")
+        label.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_SM}px;")
         layout.addWidget(label)
 
         self._spinbox = QSpinBox()
@@ -47,9 +47,9 @@ class FramePickerDialog(QDialog):
                 background: {theme.BG_ELEVATED};
                 border: 1px solid {theme.BORDER_DEFAULT};
                 border-radius: {theme.RADIUS_BTN}px;
-                padding: 6px 10px;
+                padding: 10px 14px;
                 color: {theme.TEXT_PRIMARY};
-                font-size: {theme.FONT_BASE}px;
+                font-size: {theme.FONT_LG}px;
             }}
         """)
         layout.addWidget(self._spinbox)
@@ -71,7 +71,6 @@ class UploadScreen(QWidget):
         super().__init__(parent)
         self.setAcceptDrops(True)
 
-        self._frame_dots: list[QLabel] = []
         self._current_path: str = ""
         self._max_frames: Optional[int] = None  # None = auto
 
@@ -85,8 +84,8 @@ class UploadScreen(QWidget):
         eyebrow.setStyleSheet(f"""
             QLabel {{
                 color: {theme.ACCENT};
-                font-size: {theme.FONT_XS}px;
-                letter-spacing: 2px;
+                font-size: {theme.FONT_LG}px;
+                letter-spacing: 3px;
             }}
         """)
         layout.addWidget(eyebrow)
@@ -203,9 +202,9 @@ class UploadScreen(QWidget):
 
         layout.addSpacing(8)
 
-        # Search button (hidden until a file is selected) 
+        # Search button (hidden until a file is selected)
         self._search_btn = QPushButton("Search")
-        self._search_btn.setStyleSheet(theme.browse_btn_style())
+        self._search_btn.setStyleSheet(theme.search_btn_style())
         self._search_btn.setFixedWidth(160)
         self._search_btn.setVisible(False)
         self._search_btn.clicked.connect(self._on_search)
@@ -225,7 +224,7 @@ class UploadScreen(QWidget):
         prog_analyzing.setStyleSheet(f"color: {theme.TEXT_DIM}; font-size: {theme.FONT_SM}px;")
         prog_top.addWidget(prog_analyzing)
         prog_top.addStretch()
-        self._prog_count = QLabel("0 / 0")
+        self._prog_count = QLabel("")
         self._prog_count.setStyleSheet(f"color: {theme.ACCENT}; font-size: {theme.FONT_SM}px;")
         prog_top.addWidget(self._prog_count)
         prog_layout.addLayout(prog_top)
@@ -235,11 +234,6 @@ class UploadScreen(QWidget):
         self._progress_bar.setFixedHeight(3)
         self._progress_bar.setStyleSheet(theme.progress_bar_style())
         prog_layout.addWidget(self._progress_bar)
-
-        self._dots_row = QHBoxLayout()
-        self._dots_row.setSpacing(6)
-        self._dots_row.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        prog_layout.addLayout(self._dots_row)
 
         layout.addWidget(self._progress_widget)
         layout.addStretch()
@@ -274,7 +268,6 @@ class UploadScreen(QWidget):
             self._on_file_picked(path)
 
     def _on_paste(self) -> None:
-        # empty string = paste endpoint
         self._current_path = ""
         self._max_frames = None
         self._search_btn.setVisible(True)
@@ -291,15 +284,10 @@ class UploadScreen(QWidget):
         suffix = Path(path).suffix.lower()
         is_video = suffix not in _STILL_EXTENSIONS
 
-        # Update drop zone to show filename
         self._drop_title.setText(filename)
         self._drop_sub.setText("Video" if is_video else "Image")
-
-        # Show video options only for videos
         self._video_options.setVisible(is_video)
         self._frames_label.setText("Frames: Auto")
-
-        # Show search button
         self._search_btn.setVisible(True)
 
     def _open_frame_picker(self) -> None:
@@ -311,44 +299,21 @@ class UploadScreen(QWidget):
     def _on_search(self) -> None:
         self.search_requested.emit(self._current_path, self._max_frames)
 
-    # API
+    # Progress API
 
     def start_progress(self, total_frames: int) -> None:
-        self._frame_dots.clear()
-        while self._dots_row.count():
-            item = self._dots_row.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-        self._progress_bar.setMaximum(total_frames)
+        self._progress_bar.setMaximum(max(total_frames, 1))
         self._progress_bar.setValue(0)
-        self._prog_count.setText(f"0 / {total_frames}")
-
-        for i in range(total_frames):
-            dot = QLabel(str(i + 1))
-            dot.setFixedSize(28, 28)
-            dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            dot.setStyleSheet(theme.frame_dot_style("default"))
-            self._frame_dots.append(dot)
-            self._dots_row.addWidget(dot)
-
+        self._prog_count.setText("Analyzing...")
         self._progress_widget.setVisible(True)
 
     def update_progress(self, frame_index: int) -> None:
-        total = len(self._frame_dots)
-        if frame_index < total:
-            self._frame_dots[frame_index].setStyleSheet(theme.frame_dot_style("done"))
-        if frame_index + 1 < total:
-            self._frame_dots[frame_index + 1].setStyleSheet(theme.frame_dot_style("active"))
-
-        done = frame_index + 1
-        self._progress_bar.setValue(done)
-        self._prog_count.setText(f"{done} / {total}")
+        self._progress_bar.setValue(frame_index + 1)
+        self._prog_count.setText("Analyzing...")
 
     def reset(self) -> None:
         self._progress_widget.setVisible(False)
         self._progress_bar.setValue(0)
-        self._frame_dots.clear()
         self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False))
         self._drop_title.setText("Drop your file here")
         self._drop_sub.setText("Screenshot, GIF, or video clip")
@@ -356,3 +321,4 @@ class UploadScreen(QWidget):
         self._video_options.setVisible(False)
         self._current_path = ""
         self._max_frames = None
+        
