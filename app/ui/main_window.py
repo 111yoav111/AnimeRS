@@ -8,6 +8,7 @@ from ui.theme import (
     BG_APP, DOT_RED, DOT_YELLOW, DOT_GREEN,
     WINDOW_WIDTH, WINDOW_HEIGHT,
     titlebar_style, app_style, credit_style,
+    frame_dot_style,
 )
 from ui.upload_screen import UploadScreen
 from ui.result_screen import ResultScreen
@@ -32,7 +33,7 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        # Titlebar 
+        # Titlebar
         titlebar = QWidget()
         titlebar.setObjectName("titlebar")
         titlebar.setFixedHeight(44)
@@ -91,27 +92,24 @@ class MainWindow(QMainWindow):
 
         root_layout.addWidget(credit_bar)
 
-        # Signals - output
-        self._upload_screen.file_selected.connect(self._on_file_selected)
+        # Signals
+        self._upload_screen.search_requested.connect(self._on_search_requested)
         self._result_screen.go_back.connect(self._on_go_back)
 
-    # Slots 
+    # Slots
 
-    def _on_file_selected(self, path: str) -> None:
+    def _on_search_requested(self, path: str, max_frames) -> None:
         """
-        User picked a file (drop / browse / Ctrl+V).
-
-        call to the worker and show a waiting state.
+        User clicked Search - call the worker with the file and frame count.
+        max_frames is None (auto) or an int (user picked).
         """
         self._current_filename = path.split("/")[-1].split("\\")[-1] if path else ""
 
         # Show a single pulsing dot while we wait for the backend
         self._upload_screen.start_progress(1)
-        self._upload_screen._frame_dots[0].setStyleSheet(
-            __import__('ui.theme', fromlist=['theme']).frame_dot_style("active")
-        )
+        self._upload_screen._frame_dots[0].setStyleSheet(frame_dot_style("active"))
 
-        self._worker = SearchWorker(file_path=path)
+        self._worker = SearchWorker(file_path=path, max_frames=max_frames)
         self._worker.finished.connect(self._on_search_finished)
         self._worker.error.connect(self._on_search_error)
         self._worker.start()
@@ -120,7 +118,6 @@ class MainWindow(QMainWindow):
         """
         Worker finished - populate result screen and switch to it.
         """
-        # the real frame count, update the dots to reflect it
         frames_total = verdict.get("frames_total", 1)
         self._upload_screen.start_progress(frames_total)
         for i in range(frames_total):

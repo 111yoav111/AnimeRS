@@ -1,3 +1,5 @@
+from typing import Optional
+
 import httpx
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -9,7 +11,7 @@ _TIMEOUT  = 120.0  # seconds — video searches can be slow due to frame sleepin
 
 class SearchWorker(QThread):
     """
-    Background thread for a single search requestm, talks with the FastAPI backend.
+    Background thread for a single search request, talks with the FastAPI backend.
 
     Output
     -------
@@ -19,16 +21,19 @@ class SearchWorker(QThread):
     finished = pyqtSignal(dict)
     error    = pyqtSignal(str)
 
-    def __init__(self, file_path: str, parent=None):
+    def __init__(self, file_path: str, max_frames: Optional[int] = None, parent=None):
         """
         Parameters
         ----------
         file_path : str
             path to the file to search.
             Pass an empty string "" to trigger the /search/paste endpoint.
+        max_frames : int | None
+            User-selected frame count. None = auto (dynamic logic in backend).
         """
         super().__init__(parent)
         self._file_path = file_path
+        self._max_frames = max_frames
 
     def run(self) -> None:
         """
@@ -62,10 +67,15 @@ class SearchWorker(QThread):
 
         filename = path.split("/")[-1].split("\\")[-1]
 
+        data = {}
+        if self._max_frames is not None:
+            data["max_frames"] = str(self._max_frames)
+
         with httpx.Client(timeout=_TIMEOUT) as client:
             resp = client.post(
                 f"{_API_BASE}/search",
                 files={"image": (filename, file_bytes)},
+                data=data,
             )
             resp.raise_for_status()
             return resp.json()
