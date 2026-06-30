@@ -1,8 +1,11 @@
+import base64
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QPushButton, QProgressBar, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap
 
 from ui import theme
 
@@ -48,10 +51,10 @@ class ResultScreen(QWidget):
         hero_layout.setSpacing(16)
         hero_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # Cover placeholder
-        cover = QFrame()
-        cover.setFixedSize(theme.COVER_W, theme.COVER_H)
-        cover.setStyleSheet(f"""
+        # Cover — shows the anime cover image when available, falls back to a TV emoji
+        self._cover = QFrame()
+        self._cover.setFixedSize(theme.COVER_W, theme.COVER_H)
+        self._cover.setStyleSheet(f"""
             QFrame {{
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
                     stop:0 {theme.BG_ELEVATED}, stop:1 {theme.BG_SURFACE});
@@ -59,12 +62,13 @@ class ResultScreen(QWidget):
                 border-radius: 8px;
             }}
         """)
-        cover_layout = QVBoxLayout(cover)
-        cover_tv = QLabel("📺")
-        cover_tv.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cover_tv.setStyleSheet(f"color: {theme.TEXT_DEEP}; font-size: 22px; border: none;")
-        cover_layout.addWidget(cover_tv)
-        hero_layout.addWidget(cover, alignment=Qt.AlignmentFlag.AlignTop)
+        cover_layout = QVBoxLayout(self._cover)
+        cover_layout.setContentsMargins(0, 0, 0, 0)
+        self._cover_label = QLabel("📺")
+        self._cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._cover_label.setStyleSheet(f"color: {theme.TEXT_DEEP}; font-size: 22px; border: none;")
+        cover_layout.addWidget(self._cover_label)
+        hero_layout.addWidget(self._cover, alignment=Qt.AlignmentFlag.AlignTop)
 
         # Meta column
         meta = QWidget()
@@ -241,6 +245,9 @@ class ResultScreen(QWidget):
         native = verdict.get("Native Title", "")
         self._native_label.setText(native if native and native != "Unknown" else "")
 
+        # Cover image — set if the worker fetched one, fall back to emoji otherwise
+        self._set_cover(verdict.get("cover_image_b64"))
+
         # Clear old badges
         while self._badges_row.count():
             item = self._badges_row.takeAt(0)
@@ -303,6 +310,41 @@ class ResultScreen(QWidget):
 
     # -----helpers-----------
 
+    def _set_cover(self, cover_image_b64: str | None) -> None:
+        """
+        Decode and display the cover image fetched by the worker, or
+        fall back to the TV emoji placeholder if none is available.
+        """
+        if not cover_image_b64:
+            self._cover_label.setText("📺")
+            self._cover_label.setPixmap(QPixmap())
+            return
+
+        try:
+            image_bytes = base64.b64decode(cover_image_b64)
+            pixmap = QPixmap()
+            pixmap.loadFromData(image_bytes)
+            if pixmap.isNull():
+                raise ValueError("Empty pixmap")
+
+            scaled = pixmap.scaled(
+                theme.COVER_W, theme.COVER_H,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._cover_label.setText("")
+            self._cover_label.setPixmap(scaled)
+            self._cover.setStyleSheet(f"""
+                QFrame {{
+                    background: transparent;
+                    border: 1px solid {theme.BORDER_DEFAULT};
+                    border-radius: 8px;
+                }}
+            """)
+        except Exception:
+            self._cover_label.setText("📺")
+            self._cover_label.setPixmap(QPixmap())
+
     def _make_stat(self, label: str, value: str, sub: str) -> QFrame:
         frame = QFrame()
         frame.setStyleSheet(theme.stat_box_style())
@@ -336,3 +378,4 @@ class ResultScreen(QWidget):
     def _update_stat(self, frame: QFrame, value: str, sub: str) -> None:
         frame.findChild(QLabel, "stat_value").setText(value)
         frame.findChild(QLabel, "stat_sub").setText(sub)
+        
