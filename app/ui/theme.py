@@ -178,10 +178,12 @@ def frame_dot_style(state: str = "default") -> str:
         }}
     """
  
-def result_card_style() -> str:
+def result_card_style(transparent: bool = False) -> str:
+    # transparent=True is used for card/background to be showed.
+    bg = "rgba(17, 17, 21, 130)" if transparent else BG_SURFACE
     return f"""
         QFrame#result_card {{
-            background: {BG_SURFACE};
+            background: {bg};
             border: 1px solid {BORDER_SUBTLE};
             border-radius: {RADIUS_CARD}px;
         }}

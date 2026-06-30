@@ -49,13 +49,15 @@ class SearchWorker(QThread):
             else:
                 verdict = self._search_file(self._file_path)
 
-            # Fetch the cover image while we still have the animelist_id,
-            # so it's ready by the time the result screen shows.
+            # Fetch cover + banner while we still have the animelist_id,
+            # so both are ready by the time the result screen shows.
             animelist_id = verdict.get("animelist_id")
             if animelist_id and animelist_id != "Unknown":
-                cover_b64 = self._fetch_cover(animelist_id)
+                cover_b64, banner_b64 = self._fetch_images(animelist_id)
                 if cover_b64:
                     verdict["cover_image_b64"] = cover_b64
+                if banner_b64:
+                    verdict["banner_image_b64"] = banner_b64
 
             self.finished.emit(verdict)
 
@@ -72,13 +74,17 @@ class SearchWorker(QThread):
         except Exception as exc:
             self.error.emit(f"Error: {exc}")
 
-    def _fetch_cover(self, animelist_id) -> Optional[str]:
+    def _fetch_images(self, animelist_id) -> tuple[Optional[str], Optional[str]]:
         """
-        Fetch the anime cover image from AniList's GraphQL API.
+        Fetch the anime cover + banner images from AniList's GraphQL API.
 
-        Returns the image as a base64 string (for easy JSON-free transport
-        between thread and UI), or None if anything fails.
+        Returns (cover_b64, banner_b64) - either can be None if missing/error.
+
+        Images are returned as base64 strings since they need to travel through a plain dict via pyqtSignal.
         """
+        cover_b64: Optional[str] = None
+        banner_b64: Optional[str] = None
+
         try:
             query = """
             query ($id: Int) {
@@ -86,6 +92,7 @@ class SearchWorker(QThread):
                     coverImage {
                         large
                     }
+                    bannerImage
                 }
             }
             """
@@ -97,23 +104,26 @@ class SearchWorker(QThread):
                 resp.raise_for_status()
                 data = resp.json()
 
-            cover_url = (
-                data.get("data", {})
-                .get("Media", {})
-                .get("coverImage", {})
-                .get("large")
-            )
-            if not cover_url:
-                return None
+            media = data.get("data", {}).get("Media", {}) or {}
+            cover_url = (media.get("coverImage") or {}).get("large")
+            banner_url = media.get("bannerImage")
 
             with httpx.Client(timeout=8.0) as client:
-                img_resp = client.get(cover_url)
-                img_resp.raise_for_status()
-                return base64.b64encode(img_resp.content).decode("ascii")
+                if cover_url:
+                    img_resp = client.get(cover_url)
+                    img_resp.raise_for_status()
+                    cover_b64 = base64.b64encode(img_resp.content).decode("ascii")
+
+                if banner_url:
+                    img_resp = client.get(banner_url)
+                    img_resp.raise_for_status()
+                    banner_b64 = base64.b64encode(img_resp.content).decode("ascii")
 
         except Exception:
-            # Cover is a nice-to-have, never let it break the search
-            return None
+            # cant load image, then forget about it
+            pass
+
+        return cover_b64, banner_b64
 
     def _search_file(self, path: str) -> dict:
         with open(path, "rb") as f:

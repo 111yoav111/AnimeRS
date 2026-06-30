@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QFrame, QPushButton, QProgressBar, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor
 
 from ui import theme
 
@@ -16,6 +16,9 @@ class ResultScreen(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        self._raw_banner_pixmap = None
+        self._rendered_banner_pixmap = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -30,10 +33,10 @@ class ResultScreen(QWidget):
 
         layout.addSpacing(20)
 
-        # Result card
+        # Result card - like 50%-transparent so the banner shows through
         self._card = QFrame()
         self._card.setObjectName("result_card")
-        self._card.setStyleSheet(theme.result_card_style())
+        self._card.setStyleSheet(theme.result_card_style(transparent=True))
         card_layout = QVBoxLayout(self._card)
         card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(0)
@@ -42,7 +45,7 @@ class ResultScreen(QWidget):
         result_top.setObjectName("result_hero")
         result_top.setStyleSheet(f"""
             QFrame#result_hero {{
-                background: {theme.BG_SURFACE_2};
+                background: rgba(20, 20, 24, 130);
                 border-bottom: 1px solid {theme.BORDER_SUBTLE};
             }}
         """)
@@ -118,7 +121,7 @@ class ResultScreen(QWidget):
 
         # Stats section
         stats_widget = QWidget()
-        stats_widget.setStyleSheet(f"background: {theme.BG_SURFACE};")
+        stats_widget.setStyleSheet("background: rgba(17, 17, 21, 130);")
         stats_layout = QHBoxLayout(stats_widget)
         stats_layout.setContentsMargins(18, 14, 18, 14)
         stats_layout.setSpacing(10)
@@ -134,7 +137,7 @@ class ResultScreen(QWidget):
 
         # Similarity bar
         sim_widget = QWidget()
-        sim_widget.setStyleSheet(f"background: {theme.BG_SURFACE};")
+        sim_widget.setStyleSheet("background: rgba(17, 17, 21, 130);")
         sim_layout = QVBoxLayout(sim_widget)
         sim_layout.setContentsMargins(18, 0, 18, 18)
         sim_layout.setSpacing(6)
@@ -209,6 +212,23 @@ class ResultScreen(QWidget):
 
         layout.addStretch()
 
+    # Layout events
+
+    def paintEvent(self, event) -> None:
+        """
+        Paint the banner (with gradient already in) as the widgets own background first.
+        """
+        if self._rendered_banner_pixmap is not None:
+            painter = QPainter(self)
+            painter.drawPixmap(0, 0, self._rendered_banner_pixmap)
+            painter.end()
+        super().paintEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._raw_banner_pixmap is not None:
+            self._render_banner(self._raw_banner_pixmap)
+
     # API
 
     def show_result(self, verdict: dict, filename: str = "") -> None:
@@ -220,7 +240,8 @@ class ResultScreen(QWidget):
             self._card.setVisible(False)
             self._no_match.setVisible(True)
             self._quota_reminder.setVisible(False)
-            self._quota_low_warning.setVisible(False) 
+            self._quota_low_warning.setVisible(False)
+            self._set_banner(None)
             return
 
         self._card.setVisible(True)
@@ -245,8 +266,11 @@ class ResultScreen(QWidget):
         native = verdict.get("Native Title", "")
         self._native_label.setText(native if native and native != "Unknown" else "")
 
-        # Cover image — set if the worker fetched one, fall back to emoji otherwise
+        # Cover image -> set if the worker fetched one, fall back to emoji otherwise
         self._set_cover(verdict.get("cover_image_b64"))
+
+        # Background banner -> set if the worker fetched one, fall back to plain dark bg
+        self._set_banner(verdict.get("banner_image_b64"))
 
         # Clear old badges
         while self._badges_row.count():
@@ -345,6 +369,85 @@ class ResultScreen(QWidget):
             self._cover_label.setText("📺")
             self._cover_label.setPixmap(QPixmap())
 
+    def _set_banner(self, banner_image_b64: str | None) -> None:
+        """
+        Decode the banner image and store it for rendering as background.
+
+        Falls back to plain dark background if no banner is available.
+        """
+        if not banner_image_b64:
+            self._raw_banner_pixmap = None
+            self._rendered_banner_pixmap = None
+            self.update()
+            return
+
+        try:
+            image_bytes = base64.b64decode(banner_image_b64)
+            pixmap = QPixmap()
+            pixmap.loadFromData(image_bytes)
+            if pixmap.isNull():
+                raise ValueError("Empty pixmap")
+
+            self._raw_banner_pixmap = pixmap
+            self._render_banner(pixmap)
+        except Exception:
+            self._raw_banner_pixmap = None
+            self._rendered_banner_pixmap = None
+            self.update()
+
+    def _render_banner(self, pixmap: QPixmap) -> None:
+        """
+        Scale the banner to fill as background and all needed with that.
+
+        Stores the result for paintEvent to draw.
+        """
+        from ui import theme as _theme  # local import avoids import issues
+        width = self.width() or _theme.WINDOW_WIDTH
+        height = self.height() or _theme.WINDOW_HEIGHT
+
+        if width <= 0 or height <= 0:
+            return
+
+        src_w = pixmap.width()
+        src_h = pixmap.height()
+        if src_w == 0 or src_h == 0:
+            return
+
+        target_ratio = width / height
+        src_ratio = src_w / src_h
+
+        # Scale so the smaller dimension matches exactly, overflow gets cropped
+        if src_ratio > target_ratio:
+            # Source is wider than screen so match height, crop width
+            scaled_h = height
+            scaled_w = int(height * src_ratio)
+        else:
+            scaled_w = width
+            scaled_h = int(width / src_ratio)
+
+        scaled = pixmap.scaled(
+            scaled_w, scaled_h,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+        x = max(0, (scaled.width() - width) // 2)
+        y = max(0, (scaled.height() - height) // 2)
+        cropped = scaled.copy(x, y, width, height)
+
+        # Add gradient for text
+        painter = QPainter(cropped)
+        gradient = QLinearGradient(0, 0, 0, height)
+        gradient.setColorAt(0.0, QColor(13, 13, 15, 210))
+        gradient.setColorAt(0.35, QColor(13, 13, 15, 120))
+        gradient.setColorAt(0.65, QColor(13, 13, 15, 140))
+        gradient.setColorAt(1.0, QColor(13, 13, 15, 220))
+        painter.fillRect(cropped.rect(), gradient)
+        painter.end()
+
+        self._rendered_banner_pixmap = cropped
+        self.update()
+
     def _make_stat(self, label: str, value: str, sub: str) -> QFrame:
         frame = QFrame()
         frame.setStyleSheet(theme.stat_box_style())
@@ -378,4 +481,3 @@ class ResultScreen(QWidget):
     def _update_stat(self, frame: QFrame, value: str, sub: str) -> None:
         frame.findChild(QLabel, "stat_value").setText(value)
         frame.findChild(QLabel, "stat_sub").setText(sub)
-        
