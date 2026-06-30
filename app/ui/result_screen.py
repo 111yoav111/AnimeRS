@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QPushButton, QProgressBar, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QRect
 from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor
 
 from ui import theme
@@ -17,8 +17,7 @@ class ResultScreen(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self._raw_banner_pixmap = None
-        self._rendered_banner_pixmap = None
+        self._bg_pixmap = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -216,18 +215,53 @@ class ResultScreen(QWidget):
 
     def paintEvent(self, event) -> None:
         """
-        Paint the banner (with gradient already in) as the widgets own background first.
+        Paint the banner as the background, scaled to *cover* the whole screen. 
+
+        Scaling happens here, against self.rect(), so the banner always fill the screen.
         """
-        if self._rendered_banner_pixmap is not None:
+        if self._bg_pixmap is not None and not self._bg_pixmap.isNull():
             painter = QPainter(self)
-            painter.drawPixmap(0, 0, self._rendered_banner_pixmap)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+
+            target = self.rect()
+            src = self._bg_pixmap
+            src_w, src_h = src.width(), src.height()
+
+            if src_w > 0 and src_h > 0 and target.width() > 0 and target.height() > 0:
+                target_ratio = target.width() / target.height()
+                src_ratio = src_w / src_h
+
+                # widget's aspect ratio -> classic cover crop.
+                if src_ratio > target_ratio:
+                    # Source too wide: crop left/right.
+                    crop_w = int(round(src_h * target_ratio))
+                    crop_x = (src_w - crop_w) // 2
+                    src_rect = QRect(crop_x, 0, crop_w, src_h)
+                else:
+                    # Source too tall: crop top/bottom.
+                    crop_h = int(round(src_w / target_ratio))
+                    crop_y = (src_h - crop_h) // 2
+                    src_rect = QRect(0, crop_y, src_w, crop_h)
+
+                # Scale that crop to exactly fill the widget. Passing the target
+                # rect (not a fixed pixel size) guarantees a full fill every time.
+                painter.drawPixmap(target, src, src_rect)
+
+                # Dark gradient overlay for text contrast.
+                gradient = QLinearGradient(0, 0, 0, target.height())
+                gradient.setColorAt(0.0, QColor(13, 13, 15, 210))
+                gradient.setColorAt(0.35, QColor(13, 13, 15, 120))
+                gradient.setColorAt(0.65, QColor(13, 13, 15, 140))
+                gradient.setColorAt(1.0, QColor(13, 13, 15, 220))
+                painter.fillRect(target, gradient)
+
             painter.end()
         super().paintEvent(event)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if self._raw_banner_pixmap is not None:
-            self._render_banner(self._raw_banner_pixmap)
+        # paintEvent reads the live size, so just trigger a repaint.
+        self.update()
 
     # API
 
@@ -241,7 +275,7 @@ class ResultScreen(QWidget):
             self._no_match.setVisible(True)
             self._quota_reminder.setVisible(False)
             self._quota_low_warning.setVisible(False)
-            self._set_banner(None)
+            self._set_background(None)
             return
 
         self._card.setVisible(True)
@@ -266,11 +300,13 @@ class ResultScreen(QWidget):
         native = verdict.get("Native Title", "")
         self._native_label.setText(native if native and native != "Unknown" else "")
 
-        # Cover image -> set if the worker fetched one, fall back to emoji otherwise
-        self._set_cover(verdict.get("cover_image_b64"))
-
-        # Background banner -> set if the worker fetched one, fall back to plain dark bg
-        self._set_banner(verdict.get("banner_image_b64"))
+        # Cover image is used in TWO places:
+        #   1. the thumbnail inside the card
+        #   2. scaled up to fill the screen as the background
+        # The banner from the API is ignored.
+        cover_b64 = verdict.get("cover_image_b64")
+        self._set_cover(cover_b64)
+        self._set_background(cover_b64)
 
         # Clear old badges
         while self._badges_row.count():
@@ -369,84 +405,31 @@ class ResultScreen(QWidget):
             self._cover_label.setText("📺")
             self._cover_label.setPixmap(QPixmap())
 
-    def _set_banner(self, banner_image_b64: str | None) -> None:
+    def _set_background(self, cover_image_b64: str | None) -> None:
         """
-        Decode the banner image and store it for rendering as background.
+        Decode the cover image and store it for paintEvent to draw for background.
 
-        Falls back to plain dark background if no banner is available.
+        This is the same image (cover) shown as the card thumbnail, just larger.
+
+        Falls back to a plain dark background if no cover is available.
         """
-        if not banner_image_b64:
-            self._raw_banner_pixmap = None
-            self._rendered_banner_pixmap = None
+        if not cover_image_b64:
+            self._bg_pixmap = None
             self.update()
             return
 
         try:
-            image_bytes = base64.b64decode(banner_image_b64)
+            image_bytes = base64.b64decode(cover_image_b64)
             pixmap = QPixmap()
             pixmap.loadFromData(image_bytes)
             if pixmap.isNull():
                 raise ValueError("Empty pixmap")
 
-            self._raw_banner_pixmap = pixmap
-            self._render_banner(pixmap)
-        except Exception:
-            self._raw_banner_pixmap = None
-            self._rendered_banner_pixmap = None
+            self._bg_pixmap = pixmap
             self.update()
-
-    def _render_banner(self, pixmap: QPixmap) -> None:
-        """
-        Scale the banner to fill as background and all needed with that.
-
-        Stores the result for paintEvent to draw.
-        """
-        from ui import theme as _theme  # local import avoids import issues
-        width = self.width() or _theme.WINDOW_WIDTH
-        height = self.height() or _theme.WINDOW_HEIGHT
-
-        if width <= 0 or height <= 0:
-            return
-
-        src_w = pixmap.width()
-        src_h = pixmap.height()
-        if src_w == 0 or src_h == 0:
-            return
-
-        target_ratio = width / height
-        src_ratio = src_w / src_h
-
-        # Scale so the smaller dimension matches exactly, overflow gets cropped
-        if src_ratio > target_ratio:
-            # Source is wider than screen so match height, crop width
-            scaled_h = height
-            scaled_w = int(height * src_ratio)
-        else:
-            scaled_w = width
-            scaled_h = int(width / src_ratio)
-
-        scaled = pixmap.scaled(
-            scaled_w, scaled_h,
-            Qt.AspectRatioMode.IgnoreAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-
-        x = max(0, (scaled.width() - width) // 2)
-        y = max(0, (scaled.height() - height) // 2)
-        cropped = scaled.copy(x, y, width, height)
-
-        # Add gradient for text
-        painter = QPainter(cropped)
-        gradient = QLinearGradient(0, 0, 0, height)
-        gradient.setColorAt(0.0, QColor(13, 13, 15, 210))
-        gradient.setColorAt(0.35, QColor(13, 13, 15, 120))
-        gradient.setColorAt(0.65, QColor(13, 13, 15, 140))
-        gradient.setColorAt(1.0, QColor(13, 13, 15, 220))
-        painter.fillRect(cropped.rect(), gradient)
-        painter.end()
-
-        self._rendered_banner_pixmap = cropped
-        self.update()
+        except Exception:
+            self._bg_pixmap = None
+            self.update()
 
     def _make_stat(self, label: str, value: str, sub: str) -> QFrame:
         frame = QFrame()
