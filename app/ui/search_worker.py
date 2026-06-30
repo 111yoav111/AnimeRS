@@ -1,12 +1,15 @@
 from typing import Optional
 
 import httpx
+import base64
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 # Base URL - FastAPI running locally
 _API_BASE = "http://localhost:8000"
 _TIMEOUT  = 120.0  # seconds — video searches can be slow due to frame sleeping
+
+_ANILIST_GRAPHQL_URL = "https://graphql.anilist.co"
 
 
 class SearchWorker(QThread):
@@ -38,7 +41,6 @@ class SearchWorker(QThread):
     def run(self) -> None:
         """
         Called automatically by QThread.start().
-        
         Runs in the background thread - never call directly.
         """
         try:
@@ -47,10 +49,13 @@ class SearchWorker(QThread):
             else:
                 verdict = self._search_file(self._file_path)
 
-            # Every N searches the backend pop quota_reminder.
-            # On those searches also check /quota for low quota warning.
-            if verdict.get("quota_reminder"):
-                self._check_low_quota(verdict)
+            # Fetch the cover image while we still have the animelist_id,
+            # so it's ready by the time the result screen shows.
+            animelist_id = verdict.get("animelist_id")
+            if animelist_id and animelist_id != "Unknown":
+                cover_b64 = self._fetch_cover(animelist_id)
+                if cover_b64:
+                    verdict["cover_image_b64"] = cover_b64
 
             self.finished.emit(verdict)
 
@@ -67,26 +72,48 @@ class SearchWorker(QThread):
         except Exception as exc:
             self.error.emit(f"Error: {exc}")
 
-    def _check_low_quota(self, verdict: dict) -> None:
+    def _fetch_cover(self, animelist_id) -> Optional[str]:
         """
-        Call GET /quota and pop a low_quota_warning into the verdict if running low.
+        Fetch the anime cover image from AniList's GraphQL API.
 
-        Only called every N searches - when quota_reminder is present.
+        Returns the image as a base64 string (for easy JSON-free transport
+        between thread and UI), or None if anything fails.
         """
         try:
-            with httpx.Client(timeout=10.0) as client:
-                resp = client.get(f"{_API_BASE}/quota")
-                resp.raise_for_status()
-                quota_data = resp.json()
-
-            if quota_data.get("low_quota"):
-                remaining = quota_data.get("remaining", 0)
-                verdict["quota_low_warning"] = (
-                    f"Only {remaining} searches remaining today."
+            query = """
+            query ($id: Int) {
+                Media(id: $id, type: ANIME) {
+                    coverImage {
+                        large
+                    }
+                }
+            }
+            """
+            with httpx.Client(timeout=8.0) as client:
+                resp = client.post(
+                    _ANILIST_GRAPHQL_URL,
+                    json={"query": query, "variables": {"id": int(animelist_id)}},
                 )
+                resp.raise_for_status()
+                data = resp.json()
+
+            cover_url = (
+                data.get("data", {})
+                .get("Media", {})
+                .get("coverImage", {})
+                .get("large")
+            )
+            if not cover_url:
+                return None
+
+            with httpx.Client(timeout=8.0) as client:
+                img_resp = client.get(cover_url)
+                img_resp.raise_for_status()
+                return base64.b64encode(img_resp.content).decode("ascii")
+
         except Exception:
-            # If quota check fails, just skip it
-            pass
+            # Cover is a nice-to-have, never let it break the search
+            return None
 
     def _search_file(self, path: str) -> dict:
         with open(path, "rb") as f:
