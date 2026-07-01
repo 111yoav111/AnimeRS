@@ -17,6 +17,7 @@ BG_HOVER      = "#222230"   # button hover
 BORDER_SUBTLE  = "#1e1e24"  # app border, titlebar separator, card border
 BORDER_DEFAULT = "#2a2a35"  # browse btn, frame dots
 BORDER_ACCENT  = "#7F77DD"  # drop zone hover, progress, frame dot done/active
+BORDER_DROP    = "#5a5a72"  # drop zone dashed outline over a background image - needs to stand out more
  
 # Accent — purple
 ACCENT         = "#7F77DD"  # progress bar, similarity bar, active dots
@@ -28,6 +29,7 @@ TEXT_MUTED     = "#aaa"     # browse btn, back btn hover
 TEXT_DIM       = "#666"     # progress label, browse btn default
 TEXT_FAINT     = "#555"     # drop sub, back btn default
 TEXT_GHOST     = "#444"     # titlebar label, native title, stat labels, divider
+TEXT_DEV       = "#8F7F24"  # yay :)
 TEXT_DEEP      = "#3e3e50"  # stat sub, drop icon default
  
 # Badge - episode (purple tint)
@@ -115,9 +117,30 @@ def titlebar_style() -> str:
         }}
     """
  
-def drop_zone_style(hover: bool = False) -> str:
+def card_style(transparent: bool = False) -> str:
+    # Generic boxed-card look, same as result_card_style.
+    bg = "rgba(17, 17, 21, 130)" if transparent else BG_SURFACE
+    return f"""
+        QFrame#upload_card {{
+            background: {bg};
+            border: 1px solid {BORDER_SUBTLE};
+            border-radius: {RADIUS_CARD}px;
+        }}
+    """
+
+
+def drop_zone_style(hover: bool = False, transparent: bool = False) -> str:
+    if transparent:
+        border_color = BORDER_ACCENT if hover else BORDER_DROP
+        return f"""
+            QFrame#drop_zone {{
+                background: transparent;
+                border: 2px dashed {border_color};
+                border-radius: {RADIUS_CARD}px;
+            }}
+        """
+    bg = BG_ELEVATED_2 if hover else BG_SURFACE
     border_color = BORDER_ACCENT if hover else BORDER_DEFAULT
-    bg           = BG_ELEVATED_2 if hover else BG_SURFACE
     return f"""
         QFrame#drop_zone {{
             background: {bg};
@@ -287,8 +310,8 @@ def try_again_btn_style() -> str:
 def credit_style() -> str:
     return f"""
         QLabel {{
-            color: {TEXT_GHOST};
-            font-size: {FONT_XS}px;
+            color: {TEXT_DEV};
+            font-size: {FONT_SM}px;
         }}
     """
 
