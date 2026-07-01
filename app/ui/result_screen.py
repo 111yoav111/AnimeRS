@@ -33,7 +33,7 @@ class ResultScreen(QWidget):
 
         layout.addSpacing(20)
 
-        # Result card - like 50%-transparent so the banner shows through
+        # Result card - like 50%-transparent so the cover image shows through
         self._card = QFrame()
         self._card.setObjectName("result_card")
         self._card.setStyleSheet(theme.result_card_style(transparent=True))
@@ -80,10 +80,24 @@ class ResultScreen(QWidget):
         meta_layout.setSpacing(0)
         meta_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # Confidence badge
+        # Confidence badge (left) + release year badge (right) - same row
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(0)
+
         self._confidence_badge = QLabel()
         self._confidence_badge.setFixedHeight(22)
-        meta_layout.addWidget(self._confidence_badge, alignment=Qt.AlignmentFlag.AlignLeft)
+        top_row.addWidget(self._confidence_badge, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        top_row.addStretch()
+
+        self._year_badge = QLabel()
+        self._year_badge.setFixedHeight(22)
+        self._year_badge.setStyleSheet(theme.year_badge_style())
+        self._year_badge.setVisible(False)
+        top_row.addWidget(self._year_badge, alignment=Qt.AlignmentFlag.AlignRight)
+
+        meta_layout.addLayout(top_row)
 
         meta_layout.addSpacing(8)
 
@@ -216,9 +230,9 @@ class ResultScreen(QWidget):
 
     def paintEvent(self, event) -> None:
         """
-        Paint the banner as the background, scaled to *cover* the whole screen. 
+        Paint the cover image as the background, scaled to *cover* the whole screen.
 
-        Scaling happens here, against self.rect(), so the banner always fill the screen.
+        Scaling happens here, against self.rect(), so the image always fills the screen.
         """
         if self._bg_pixmap is not None and not self._bg_pixmap.isNull():
             painter = QPainter(self)
@@ -256,6 +270,14 @@ class ResultScreen(QWidget):
         self._confidence_badge.setText(badge_text)
         self._confidence_badge.setStyleSheet(theme.confidence_badge_style(high=confident))
 
+        # Year badge - top right, opposite the confidence badge
+        year = verdict.get("year")
+        if year:
+            self._year_badge.setText(str(year))
+            self._year_badge.setVisible(True)
+        else:
+            self._year_badge.setVisible(False)
+
         # Titles
         title = (
             verdict.get("anime") or
@@ -272,7 +294,6 @@ class ResultScreen(QWidget):
         # Cover image is used in TWO places:
         #   1. the thumbnail inside the card
         #   2. scaled up to fill the screen as the background
-        # The banner from the API is ignored.
         cover_b64 = verdict.get("cover_image_b64")
         self._set_cover(cover_b64)
         self._set_background(cover_b64)
@@ -282,6 +303,13 @@ class ResultScreen(QWidget):
             item = self._badges_row.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+
+        # Season badge
+        season = verdict.get("season")
+        if season:
+            season_badge = QLabel(season)
+            season_badge.setStyleSheet(theme.badge_season_style())
+            self._badges_row.addWidget(season_badge)
 
         # Episode badge
         episode = verdict.get("episode")

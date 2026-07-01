@@ -32,6 +32,11 @@ TEXT_GHOST     = "#444"     # titlebar label, native title, stat labels, divider
 TEXT_DEV       = "#8F7F24"  # yay :)
 TEXT_DEEP      = "#3e3e50"  # stat sub, drop icon default
  
+# Badge - season (amber tint)
+BADGE_SEASON_BG     = "#241f14"
+BADGE_SEASON_BORDER = "#8A6A1E"
+BADGE_SEASON_TEXT   = "#D9AE5C"
+
 # Badge - episode (purple tint)
 BADGE_EP_BG     = "#1a1a28"
 BADGE_EP_BORDER = "#3C3489"
@@ -216,6 +221,19 @@ def result_card_style(transparent: bool = False) -> str:
         }}
     """
  
+def badge_season_style() -> str:
+    return f"""
+        QLabel {{
+            background: {BADGE_SEASON_BG};
+            border: 1px solid {BADGE_SEASON_BORDER};
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: {FONT_SM}px;
+            color: {BADGE_SEASON_TEXT};
+            font-weight: 500;
+        }}
+    """
+
 def badge_ep_style() -> str:
     return f"""
         QLabel {{
@@ -255,6 +273,18 @@ def badge_range_style() -> str:
         }}
     """
  
+def year_badge_style() -> str:
+    return f"""
+        QLabel {{
+            background: {BG_ELEVATED};
+            border: 1px solid {BORDER_DEFAULT};
+            border-radius: {RADIUS_APP}px;
+            padding: 3px 10px;
+            font-size: {FONT_SM}px;
+            color: {TEXT_MUTED};
+        }}
+    """
+
 def confidence_badge_style(high: bool = True) -> str:
     bg     = CONFIDENCE_BG     if high else CONFIDENCE_LOW_BG
     border = CONFIDENCE_BORDER if high else CONFIDENCE_LOW_BORDER

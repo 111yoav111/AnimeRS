@@ -49,15 +49,15 @@ class SearchWorker(QThread):
             else:
                 verdict = self._search_file(self._file_path)
 
-            # Fetch cover + banner while we still have the animelist_id,
+            # Fetch cover + year while we still have the animelist_id,
             # so both are ready by the time the result screen shows.
             animelist_id = verdict.get("animelist_id")
             if animelist_id and animelist_id != "Unknown":
-                cover_b64, banner_b64 = self._fetch_images(animelist_id)
+                cover_b64, year = self._fetch_images(animelist_id)
                 if cover_b64:
                     verdict["cover_image_b64"] = cover_b64
-                if banner_b64:
-                    verdict["banner_image_b64"] = banner_b64
+                if year:
+                    verdict["year"] = year
 
             self.finished.emit(verdict)
 
@@ -74,16 +74,16 @@ class SearchWorker(QThread):
         except Exception as exc:
             self.error.emit(f"Error: {exc}")
 
-    def _fetch_images(self, animelist_id) -> tuple[Optional[str], Optional[str]]:
+    def _fetch_images(self, animelist_id) -> tuple[Optional[str], Optional[int]]:
         """
-        Fetch the anime cover + banner images from AniList's GraphQL API.
+        Fetch the anime cover image + release year from AniList's GraphQL API.
 
-        Returns (cover_b64, banner_b64) - either can be None if missing/error.
+        Returns (cover_b64, year) - either can be None if missing/error.
 
-        Images are returned as base64 strings since they need to travel through a plain dict via pyqtSignal.
+        Cover is returned as a base64 string since it needs to travel through a plain dict via pyqtSignal.
         """
         cover_b64: Optional[str] = None
-        banner_b64: Optional[str] = None
+        year: Optional[int] = None
 
         try:
             query = """
@@ -92,7 +92,7 @@ class SearchWorker(QThread):
                     coverImage {
                         large
                     }
-                    bannerImage
+                    seasonYear
                 }
             }
             """
@@ -106,24 +106,19 @@ class SearchWorker(QThread):
 
             media = data.get("data", {}).get("Media", {}) or {}
             cover_url = (media.get("coverImage") or {}).get("large")
-            banner_url = media.get("bannerImage")
+            year = media.get("seasonYear")
 
-            with httpx.Client(timeout=8.0) as client:
-                if cover_url:
+            if cover_url:
+                with httpx.Client(timeout=8.0) as client:
                     img_resp = client.get(cover_url)
                     img_resp.raise_for_status()
                     cover_b64 = base64.b64encode(img_resp.content).decode("ascii")
-
-                if banner_url:
-                    img_resp = client.get(banner_url)
-                    img_resp.raise_for_status()
-                    banner_b64 = base64.b64encode(img_resp.content).decode("ascii")
 
         except Exception:
             # cant load image, then forget about it
             pass
 
-        return cover_b64, banner_b64
+        return cover_b64, year
 
     def _search_file(self, path: str) -> dict:
         with open(path, "rb") as f:

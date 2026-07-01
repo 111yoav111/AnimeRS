@@ -1,5 +1,42 @@
+import re
+
 import httpx
 import config
+
+# Common ways sequel seasons show up in an English/Romaji title on AniList,
+# e.g. "Attack on Titan Final Season", "Kaguya-sama 3rd Season", "Frieren Season 2".
+# Checked in order - first match wins.
+_SEASON_PATTERNS = [
+    re.compile(r"(\d+)(?:st|nd|rd|th)\s+Season", re.IGNORECASE),
+    re.compile(r"Season\s+(\d+)", re.IGNORECASE),
+    re.compile(r"Season\s+([IVXLCDM]+)\b"),
+]
+
+_ROMAN_NUMERALS = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7, "VIII": 8, "IX": 9, "X": 10}
+
+
+def _extract_season_number(*titles: str | None) -> int | None:
+    """
+    Pull season number out of a title string.
+
+    trace.moe/AniList don't expose season number as a clean field - each season is its own separate anime entry.
+    so this only works when the title itself spells it out. 
+    
+    Returns None if nothing matches.
+    """
+    for title in titles:
+        if not title:
+            continue
+        for pattern in _SEASON_PATTERNS:
+            match = pattern.search(title)
+            if not match:
+                continue
+            token = match.group(1)
+            if token.isdigit():
+                return int(token)
+            if token.upper() in _ROMAN_NUMERALS:
+                return _ROMAN_NUMERALS[token.upper()]
+    return None
 
 
 def search(image_bytes: bytes) -> list[dict]:
@@ -57,12 +94,18 @@ def _clean_resp(anw: dict) -> dict:
     anime_list = anw.get("anilist") or {}
     title = anime_list.get("title") or {}
 
+    english_title = title.get("english") or None
+    romaji_title = title.get("romaji") or None
+
+    season_number = _extract_season_number(english_title, romaji_title)
+
     return {
-        "English Title": title.get("english") or None,
-        "Romaji": title.get("romaji")  or None,
+        "English Title": english_title,
+        "Romaji": romaji_title,
         "Native Title": title.get("native")  or None,
         "Episode": anw.get("episode") or None,
         "Timestamp": _fmt_timestamp(anw.get("from")),
+        "Season": f"Season {season_number}" if season_number else None,
         "similarity%": int((anw.get("similarity") or 0) * 100),
         "animelist_id": anime_list.get("id") or "Unknown",
     }

@@ -103,6 +103,7 @@ def build_verdict(frames: list[bytes], duration_sec: float = 0.0) -> dict:
         return {
             "found": False,
             "anime": None,
+            "season": None,
             "episode": None,
             "timestamp": None,
             "timestamp_range": None,
@@ -128,6 +129,7 @@ def build_verdict(frames: list[bytes], duration_sec: float = 0.0) -> dict:
     return {
         "found": True,
         "anime": best.get("English Title") or best.get("Romaji") or best.get("Native Title"),
+        "season": best.get("Season"),
         "episode": best.get("Episode"),
         "timestamp": timestamp,
         "timestamp_range": timestamp_range,
