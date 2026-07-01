@@ -144,3 +144,4 @@ class MainWindow(QMainWindow):
         0 = upload screen, 1 = result screen.
         """
         self.stack.setCurrentIndex(index)
+        

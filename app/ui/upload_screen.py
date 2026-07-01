@@ -7,9 +7,13 @@ from PyQt6.QtWidgets import (
     QDialog, QSpinBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent
+from PyQt6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent, QPainter
 
 from ui import theme
+from ui.background_paint import draw_cover_background, load_pixmap
+
+# The upload screens background image - only this file.
+_BG_IMAGE_PATH = Path(__file__).parent / "assets" / "bg_image.png"
 
 
 # Allowed formats for the file dialog filter
@@ -74,41 +78,53 @@ class UploadScreen(QWidget):
         self._current_path: str = ""
         self._max_frames: Optional[int] = None  # None = auto
 
+        # The local image for bg, didnt find - fall back to black bg
+        self._bg_pixmap = load_pixmap(_BG_IMAGE_PATH)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 28, 24, 28)
         layout.setSpacing(0)
 
+        # All the card stuff, drop etc...
+        self._card = QFrame()
+        self._card.setObjectName("upload_card")
+        self._card.setStyleSheet(theme.card_style(transparent=True))
+
+        card_layout = QVBoxLayout(self._card)
+        card_layout.setContentsMargins(20, 24, 20, 24)
+        card_layout.setSpacing(0)
+
         # Header
-        eyebrow = QLabel("Anime Reverse Search")
+        eyebrow = QLabel("Anime Reverse Searcher")
         eyebrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
         eyebrow.setStyleSheet(f"""
             QLabel {{
                 color: {theme.ACCENT};
-                font-size: {theme.FONT_LG}px;
+                font-size: {theme.FONT_2XL}px;
                 letter-spacing: 3px;
             }}
         """)
-        layout.addWidget(eyebrow)
+        card_layout.addWidget(eyebrow)
 
-        layout.addSpacing(6)
+        card_layout.addSpacing(6)
 
         heading = QLabel("What anime is this?")
         heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
         heading.setStyleSheet(f"""
             QLabel {{
                 color: {theme.TEXT_PRIMARY};
-                font-size: {theme.FONT_2XL}px;
+                font-size: {theme.FONT_XL}px;
                 font-weight: 500;
             }}
         """)
-        layout.addWidget(heading)
+        card_layout.addWidget(heading)
 
-        layout.addSpacing(24)
+        card_layout.addSpacing(24)
 
         # Drop area
         self._drop_zone = QFrame()
         self._drop_zone.setObjectName("drop_zone")
-        self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False))
+        self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False, transparent=True))
         self._drop_zone.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._drop_zone.setMinimumHeight(200)
 
@@ -132,9 +148,9 @@ class UploadScreen(QWidget):
         self._drop_sub.setStyleSheet(f"color: {theme.TEXT_FAINT}; font-size: {theme.FONT_SM}px;")
         dz_layout.addWidget(self._drop_sub)
 
-        layout.addWidget(self._drop_zone)
+        card_layout.addWidget(self._drop_zone)
 
-        layout.addSpacing(16)
+        card_layout.addSpacing(16)
 
         # Divider
         divider = QHBoxLayout()
@@ -158,18 +174,18 @@ class UploadScreen(QWidget):
         right_line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         divider.addWidget(right_line)
 
-        layout.addLayout(divider)
+        card_layout.addLayout(divider)
 
-        layout.addSpacing(16)
+        card_layout.addSpacing(16)
 
         # Browse btn
         browse_btn = QPushButton("Browse files")
         browse_btn.setStyleSheet(theme.browse_btn_style())
         browse_btn.setFixedWidth(160)
         browse_btn.clicked.connect(self._browse)
-        layout.addWidget(browse_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(browse_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        layout.addSpacing(16)
+        card_layout.addSpacing(16)
 
         # Video options row (hidden until a video is selected)
         self._video_options = QWidget()
@@ -198,9 +214,9 @@ class UploadScreen(QWidget):
         video_opts_layout.addWidget(change_frames_btn)
         video_opts_layout.addStretch()
 
-        layout.addWidget(self._video_options)
+        card_layout.addWidget(self._video_options)
 
-        layout.addSpacing(8)
+        card_layout.addSpacing(8)
 
         # Search button (hidden until a file is selected)
         self._search_btn = QPushButton("Search")
@@ -208,9 +224,9 @@ class UploadScreen(QWidget):
         self._search_btn.setFixedWidth(160)
         self._search_btn.setVisible(False)
         self._search_btn.clicked.connect(self._on_search)
-        layout.addWidget(self._search_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(self._search_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        layout.addSpacing(16)
+        card_layout.addSpacing(16)
 
         # Progress section (hidden until search starts)
         self._progress_widget = QWidget()
@@ -235,25 +251,45 @@ class UploadScreen(QWidget):
         self._progress_bar.setStyleSheet(theme.progress_bar_style())
         prog_layout.addWidget(self._progress_bar)
 
-        layout.addWidget(self._progress_widget)
+        card_layout.addWidget(self._progress_widget)
+
+        layout.addWidget(self._card)
         layout.addStretch()
 
         # Ctrl+V
         paste_shortcut = QShortcut(QKeySequence("Ctrl+V"), self)
         paste_shortcut.activated.connect(self._on_paste)
 
+    # Layout events
+
+    def paintEvent(self, event) -> None:
+        """
+        Paint the local background image scaled to cover the whole screen.
+        """
+        if self._bg_pixmap is not None:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            draw_cover_background(painter, self.rect(), self._bg_pixmap)
+            painter.end()
+        super().paintEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # paintEvent reads the live size, so just trigger a repaint.
+        self.update()
+
     # Drop zone events
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=True))
+            self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=True, transparent=True))
 
     def dragLeaveEvent(self, event) -> None:
-        self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False))
+        self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False, transparent=True))
 
     def dropEvent(self, event: QDropEvent) -> None:
-        self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False))
+        self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False, transparent=True))
         urls = event.mimeData().urls()
         if urls:
             self._on_file_picked(urls[0].toLocalFile())
@@ -314,11 +350,10 @@ class UploadScreen(QWidget):
     def reset(self) -> None:
         self._progress_widget.setVisible(False)
         self._progress_bar.setValue(0)
-        self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False))
+        self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False, transparent=True))
         self._drop_title.setText("Drop your file here")
         self._drop_sub.setText("Screenshot, GIF, or video clip")
         self._search_btn.setVisible(False)
         self._video_options.setVisible(False)
         self._current_path = ""
         self._max_frames = None
-        

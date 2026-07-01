@@ -4,10 +4,11 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QPushButton, QProgressBar, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QRect
-from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap, QPainter
 
 from ui import theme
+from ui.background_paint import draw_cover_background
 
 
 class ResultScreen(QWidget):
@@ -222,39 +223,7 @@ class ResultScreen(QWidget):
         if self._bg_pixmap is not None and not self._bg_pixmap.isNull():
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-
-            target = self.rect()
-            src = self._bg_pixmap
-            src_w, src_h = src.width(), src.height()
-
-            if src_w > 0 and src_h > 0 and target.width() > 0 and target.height() > 0:
-                target_ratio = target.width() / target.height()
-                src_ratio = src_w / src_h
-
-                # widget's aspect ratio -> classic cover crop.
-                if src_ratio > target_ratio:
-                    # Source too wide: crop left/right.
-                    crop_w = int(round(src_h * target_ratio))
-                    crop_x = (src_w - crop_w) // 2
-                    src_rect = QRect(crop_x, 0, crop_w, src_h)
-                else:
-                    # Source too tall: crop top/bottom.
-                    crop_h = int(round(src_w / target_ratio))
-                    crop_y = (src_h - crop_h) // 2
-                    src_rect = QRect(0, crop_y, src_w, crop_h)
-
-                # Scale that crop to exactly fill the widget. Passing the target
-                # rect (not a fixed pixel size) guarantees a full fill every time.
-                painter.drawPixmap(target, src, src_rect)
-
-                # Dark gradient overlay for text contrast.
-                gradient = QLinearGradient(0, 0, 0, target.height())
-                gradient.setColorAt(0.0, QColor(13, 13, 15, 210))
-                gradient.setColorAt(0.35, QColor(13, 13, 15, 120))
-                gradient.setColorAt(0.65, QColor(13, 13, 15, 140))
-                gradient.setColorAt(1.0, QColor(13, 13, 15, 220))
-                painter.fillRect(target, gradient)
-
+            draw_cover_background(painter, self.rect(), self._bg_pixmap)
             painter.end()
         super().paintEvent(event)
 
@@ -464,3 +433,4 @@ class ResultScreen(QWidget):
     def _update_stat(self, frame: QFrame, value: str, sub: str) -> None:
         frame.findChild(QLabel, "stat_value").setText(value)
         frame.findChild(QLabel, "stat_sub").setText(sub)
+        
