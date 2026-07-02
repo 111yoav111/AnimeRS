@@ -13,14 +13,8 @@ def get_quota() -> dict:
         quota_left - quota - quota_used
         low_quota - True if remaining <= QUOTA_LOW_THRESHOLD
     """
-    headers = {}
-    # If having an API key - have more searches 
-    if config.TRACE_MOE_API_KEY:
-        headers["x-trace-key"] = config.TRACE_MOE_API_KEY
-
     resp = httpx.get(
         f"{config.TRACE_MOE_BASE_URL}/me",
-        headers=headers,
         timeout=config.TRACE_MOE_TIMER,
     )
     resp.raise_for_status()
