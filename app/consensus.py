@@ -49,7 +49,9 @@ def calc_timestamp(matches: list[dict], duration_sec: float = 0.0) -> tuple[str 
     """
     Build timestamp output from winning frame matches.
     - Single frame (image) : exact timestamp "mm:ss"
-    - Multiple frames (video/gif): start = first frame timestamp, end = start + video duration
+    - Multiple frames (video/gif): start = first frame timestamp, end =
+      prefers the real matched timestamp of the near-last frame, but only
+      if it actually makes sense - otherwise falls back to start + video duration as an estimate.
     """
     raw_seconds = []
 
@@ -71,9 +73,22 @@ def calc_timestamp(matches: list[dict], duration_sec: float = 0.0) -> tuple[str 
         # still image - return exact timestamp
         return _fmt_timestamp(raw_seconds[0]), None
     else:
-        # video/GIF - start + duration = end
         start = raw_seconds[0]
-        end = start + int(duration_sec) if duration_sec and duration_sec != float('inf') else start
+        end = None
+
+        # Prefer the latest matched timestamp, since one frame is sampled near
+        # the end of the clip. Only use it if the resulting range is plausible;
+        # otherwise fall back, as trace.moe may match a similar earlier scene.
+        # A small tolerance accounts for timestamp rounding.
+        if len(raw_seconds) > 1 and raw_seconds[-1] > start:
+            real_range_len = raw_seconds[-1] - start
+            if duration_sec <= 0 or real_range_len >= duration_sec - 2:
+                end = raw_seconds[-1]
+
+        if end is None:
+            # Fall back to the old estimate - start + the clip's own duration.
+            end = start + int(duration_sec) if duration_sec and duration_sec != float('inf') else start
+
         return None, f"{_fmt_timestamp(start)} – {_fmt_timestamp(end)}"
 
 
