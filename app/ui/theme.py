@@ -309,7 +309,7 @@ def stat_box_style() -> str:
         }}
     """
  
-def back_btn_style() -> str:
+def check_search_btn_style() -> str:
     return f"""
         QPushButton {{
             background: none;
