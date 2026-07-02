@@ -1,9 +1,13 @@
 from typing import Optional
 
+import logging
+
 import httpx
 import base64
 
 from PyQt6.QtCore import QThread, pyqtSignal
+
+logger = logging.getLogger(__name__)
 
 # Base URL - FastAPI running locally
 _API_BASE = "http://localhost:8000"
@@ -49,15 +53,21 @@ class SearchWorker(QThread):
             else:
                 verdict = self._search_file(self._file_path)
 
-            # Fetch cover + year while we still have the animelist_id,
-            # so both are ready by the time the result screen shows.
+            # Fetch cover + year + episode thumbnail + AniList banner.
+            # so everything is ready when the result screen shows
             animelist_id = verdict.get("animelist_id")
             if animelist_id and animelist_id != "Unknown":
-                cover_b64, year = self._fetch_images(animelist_id)
+                cover_b64, year, episode_thumb_b64, banner_b64 = self._fetch_images(
+                    animelist_id, verdict.get("episode")
+                )
                 if cover_b64:
                     verdict["cover_image_b64"] = cover_b64
                 if year:
                     verdict["year"] = year
+                if episode_thumb_b64:
+                    verdict["episode_thumb_b64"] = episode_thumb_b64
+                if banner_b64:
+                    verdict["banner_image_b64"] = banner_b64
 
             self.finished.emit(verdict)
 
@@ -74,28 +84,43 @@ class SearchWorker(QThread):
         except Exception as exc:
             self.error.emit(f"Error: {exc}")
 
-    def _fetch_images(self, animelist_id) -> tuple[Optional[str], Optional[int]]:
+    def _fetch_images(
+        self, animelist_id, episode: Optional[int] = None
+    ) -> tuple[Optional[str], Optional[int], Optional[str], Optional[str]]:
         """
-        Fetch the anime cover image + release year from AniList's GraphQL API.
+        Fetch the anime cover image, release year, episode thumbnail, and
+        AniList banner image.
 
-        Returns (cover_b64, year) - either can be None if missing/error.
+        Returns (cover_b64, year, episode_thumb_b64, banner_b64). Any value may
+        be None if unavailable or an error happened.
 
-        Cover is returned as a base64 string since it needs to travel through a plain dict via pyqtSignal.
+        The episode thumbnail is taken from AniList's `streamingEpisodes` list,
+        which usually matches the requested episode but is not guaranteed.
+
+        Images are returned as base64 strings so they can be passed through a
+        plain dict via pyqtSignal.
         """
         cover_b64: Optional[str] = None
         year: Optional[int] = None
+        episode_thumb_b64: Optional[str] = None
+        banner_b64: Optional[str] = None
 
-        try:
-            query = """
-            query ($id: Int) {
-                Media(id: $id, type: ANIME) {
-                    coverImage {
-                        large
-                    }
-                    seasonYear
+        query = """
+        query ($id: Int) {
+            Media(id: $id, type: ANIME) {
+                coverImage {
+                    large
+                }
+                bannerImage
+                seasonYear
+                streamingEpisodes {
+                    title
+                    thumbnail
                 }
             }
-            """
+        }
+        """
+        try:
             with httpx.Client(timeout=8.0) as client:
                 resp = client.post(
                     _ANILIST_GRAPHQL_URL,
@@ -103,22 +128,48 @@ class SearchWorker(QThread):
                 )
                 resp.raise_for_status()
                 data = resp.json()
-
             media = data.get("data", {}).get("Media", {}) or {}
-            cover_url = (media.get("coverImage") or {}).get("large")
-            year = media.get("seasonYear")
+        except Exception as exc:
+            logger.warning("AniList metadata lookup failed for id=%s: %s", animelist_id, exc)
+            return None, None, None, None
 
-            if cover_url:
+        cover_url = (media.get("coverImage") or {}).get("large")
+        banner_url = media.get("bannerImage")
+        year = media.get("seasonYear")
+
+        episode_thumb_url = None
+        streaming_episodes = media.get("streamingEpisodes") or []
+        if episode and 1 <= episode <= len(streaming_episodes):
+            episode_thumb_url = streaming_episodes[episode - 1].get("thumbnail")
+
+        if cover_url:
+            try:
                 with httpx.Client(timeout=8.0) as client:
                     img_resp = client.get(cover_url)
                     img_resp.raise_for_status()
                     cover_b64 = base64.b64encode(img_resp.content).decode("ascii")
+            except Exception as exc:
+                logger.warning("Cover image download failed: %s", exc)
 
-        except Exception:
-            # cant load image, then forget about it
-            pass
+        if episode_thumb_url:
+            try:
+                with httpx.Client(timeout=8.0) as client:
+                    img_resp = client.get(episode_thumb_url)
+                    img_resp.raise_for_status()
+                    episode_thumb_b64 = base64.b64encode(img_resp.content).decode("ascii")
+            except Exception as exc:
+                logger.warning("Episode thumbnail download failed: %s", exc)
 
-        return cover_b64, year
+        if banner_url:
+            try:
+                with httpx.Client(timeout=8.0) as client:
+                    img_resp = client.get(banner_url)
+                    img_resp.raise_for_status()
+                    banner_b64 = base64.b64encode(img_resp.content).decode("ascii")
+            except Exception as exc:
+                logger.warning("Banner image download failed: %s", exc)
+
+        return cover_b64, year, episode_thumb_b64, banner_b64
 
     def _search_file(self, path: str) -> dict:
         with open(path, "rb") as f:

@@ -5,10 +5,34 @@ from PyQt6.QtWidgets import (
     QFrame, QPushButton, QProgressBar, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap, QPainter
+from PyQt6.QtGui import QPixmap, QPainter, QFont, QFontMetrics
 
 from ui import theme
 from ui.background_paint import draw_cover_background
+
+
+class _ImageBanner(QWidget):
+    """
+    Displays a pixmap scaled to cover the widget.
+
+    The image automatically resizes to fill the widgets current dimensions.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pixmap: QPixmap | None = None
+
+    def set_pixmap(self, pixmap: QPixmap | None) -> None:
+        self._pixmap = pixmap
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        if self._pixmap is not None and not self._pixmap.isNull():
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            draw_cover_background(painter, self.rect(), self._pixmap)
+            painter.end()
+        super().paintEvent(event)
 
 
 class ResultScreen(QWidget):
@@ -49,12 +73,13 @@ class ResultScreen(QWidget):
                 border-bottom: 1px solid {theme.BORDER_SUBTLE};
             }}
         """)
+        self._hero_normal = result_top
         hero_layout = QHBoxLayout(result_top)
         hero_layout.setContentsMargins(18, 18, 18, 18)
         hero_layout.setSpacing(16)
         hero_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # Cover — shows the anime cover image when available, falls back to a TV emoji
+        # Cover img,fall back to emoji is cant find
         self._cover = QFrame()
         self._cover.setFixedSize(theme.COVER_W, theme.COVER_H)
         self._cover.setStyleSheet(f"""
@@ -79,27 +104,6 @@ class ResultScreen(QWidget):
         meta_layout.setContentsMargins(0, 0, 0, 0)
         meta_layout.setSpacing(0)
         meta_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        # Confidence badge (left) + release year badge (right) - same row
-        top_row = QHBoxLayout()
-        top_row.setContentsMargins(0, 0, 0, 0)
-        top_row.setSpacing(0)
-
-        self._confidence_badge = QLabel()
-        self._confidence_badge.setFixedHeight(22)
-        top_row.addWidget(self._confidence_badge, alignment=Qt.AlignmentFlag.AlignLeft)
-
-        top_row.addStretch()
-
-        self._year_badge = QLabel()
-        self._year_badge.setFixedHeight(22)
-        self._year_badge.setStyleSheet(theme.year_badge_style())
-        self._year_badge.setVisible(False)
-        top_row.addWidget(self._year_badge, alignment=Qt.AlignmentFlag.AlignRight)
-
-        meta_layout.addLayout(top_row)
-
-        meta_layout.addSpacing(8)
 
         # Anime title
         self._title_label = QLabel()
@@ -132,6 +136,58 @@ class ResultScreen(QWidget):
 
         hero_layout.addWidget(meta)
         card_layout.addWidget(result_top)
+
+        # Banner hero layout, shown when an episode still is available.
+        self._hero_banner = QFrame()
+        self._hero_banner.setObjectName("result_hero_banner")
+        self._hero_banner.setStyleSheet(f"""
+            QFrame#result_hero_banner {{
+                background: transparent;
+                border-bottom: 1px solid {theme.BORDER_SUBTLE};
+            }}
+        """)
+        self._hero_banner.setVisible(False)
+        banner_outer = QVBoxLayout(self._hero_banner)
+        banner_outer.setContentsMargins(0, 0, 0, 0)
+        banner_outer.setSpacing(0)
+
+        # Image strip, full card width, fixed height
+        self._banner_image = _ImageBanner()
+        self._banner_image.setFixedHeight(150)
+        banner_outer.addWidget(self._banner_image)
+
+        # Title + native title + season/episode/timestamp/year badges, below the image
+        banner_meta = QWidget()
+        banner_meta_layout = QVBoxLayout(banner_meta)
+        banner_meta_layout.setContentsMargins(18, 14, 18, 18)
+        banner_meta_layout.setSpacing(0)
+
+        self._banner_title_label = QLabel()
+        self._banner_title_label.setStyleSheet(f"""
+            QLabel {{
+                color: {theme.TEXT_PRIMARY};
+                font-size: {theme.FONT_XL}px;
+                font-weight: 500;
+            }}
+        """)
+        self._banner_title_label.setWordWrap(False)
+        banner_meta_layout.addWidget(self._banner_title_label)
+
+        banner_meta_layout.addSpacing(2)
+
+        self._banner_native_label = QLabel()
+        self._banner_native_label.setStyleSheet(f"color: {theme.TEXT_GHOST}; font-size: {theme.FONT_SM}px;")
+        banner_meta_layout.addWidget(self._banner_native_label)
+
+        banner_meta_layout.addSpacing(12)
+
+        self._banner_badges_row = QHBoxLayout()
+        self._banner_badges_row.setSpacing(6)
+        self._banner_badges_row.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        banner_meta_layout.addLayout(self._banner_badges_row)
+
+        banner_outer.addWidget(banner_meta)
+        card_layout.addWidget(self._hero_banner)
 
         # Stats section
         stats_widget = QWidget()
@@ -264,73 +320,47 @@ class ResultScreen(QWidget):
         self._card.setVisible(True)
         self._no_match.setVisible(False)
 
-        # Confidence badge
-        confident = verdict.get("confident", False)
-        badge_text = "● High confidence" if confident else "● Low confidence"
-        self._confidence_badge.setText(badge_text)
-        self._confidence_badge.setStyleSheet(theme.confidence_badge_style(high=confident))
-
-        # Year badge - top right, opposite the confidence badge
-        year = verdict.get("year")
-        if year:
-            self._year_badge.setText(str(year))
-            self._year_badge.setVisible(True)
-        else:
-            self._year_badge.setVisible(False)
-
-        # Titles
         title = (
             verdict.get("anime") or
             verdict.get("Romaji") or
             verdict.get("Native Title") or
             "Unknown"
         )
-        self._title_label.setText(title)
-        self._title_label.setToolTip(title)
-
         native = verdict.get("Native Title", "")
-        self._native_label.setText(native if native and native != "Unknown" else "")
+        native_display = native if native and native != "Unknown" else ""
 
-        # Cover image is used in TWO places:
-        #   1. the thumbnail inside the card
-        #   2. scaled up to fill the screen as the background
         cover_b64 = verdict.get("cover_image_b64")
-        self._set_cover(cover_b64)
+        episode_thumb_b64 = verdict.get("episode_thumb_b64")
+        banner_image_b64 = verdict.get("banner_image_b64")
+
+        # Prefer the episode banner, then the AniList banner, otherwise use the cover layout.
+        banner_source = episode_thumb_b64 or banner_image_b64
+        use_banner = bool(banner_source)
+
+        self._hero_normal.setVisible(not use_banner)
+        self._hero_banner.setVisible(use_banner)
+
+        # Set titles for both layouts, shrinking the font if needed.
+        self._set_fitted_title(self._title_label, title, available_width=240, max_px=theme.FONT_XL)
+        self._title_label.setToolTip(title)
+        self._native_label.setText(native_display)
+
+        self._set_fitted_title(self._banner_title_label, title, available_width=394, max_px=theme.FONT_XL)
+        self._banner_title_label.setToolTip(title)
+        self._banner_native_label.setText(native_display)
+
+        # Show the appropriate image for the active layout.
+        if use_banner:
+            self._set_banner_image(banner_source)
+        else:
+            self._set_cover(cover_b64)
+
+        # Background always uses the poster art.
         self._set_background(cover_b64)
 
-        # Clear old badges
-        while self._badges_row.count():
-            item = self._badges_row.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-        # Season badge
-        season = verdict.get("season")
-        if season:
-            season_badge = QLabel(season)
-            season_badge.setStyleSheet(theme.badge_season_style())
-            self._badges_row.addWidget(season_badge)
-
-        # Episode badge
-        episode = verdict.get("episode")
-        if episode is not None:
-            ep_badge = QLabel(f"Episode {episode}")
-            ep_badge.setStyleSheet(theme.badge_ep_style())
-            self._badges_row.addWidget(ep_badge)
-
-        # Timestamp badge (still image)
-        timestamp = verdict.get("timestamp")
-        if timestamp:
-            ts_badge = QLabel(f"⏱ {timestamp}")
-            ts_badge.setStyleSheet(theme.badge_ts_style())
-            self._badges_row.addWidget(ts_badge)
-
-        # Range badge (video/GIF)
-        ts_range = verdict.get("timestamp_range")
-        if ts_range:
-            range_badge = QLabel(f"⏱ {ts_range}")
-            range_badge.setStyleSheet(theme.badge_range_style())
-            self._badges_row.addWidget(range_badge)
+        # Populate metadata badges for both layouts.
+        self._populate_badges(self._badges_row, verdict)
+        self._populate_badges(self._banner_badges_row, verdict)
 
         # Stats
         similarity = verdict.get("similarity", 0)
@@ -369,8 +399,7 @@ class ResultScreen(QWidget):
 
     def _set_cover(self, cover_image_b64: str | None) -> None:
         """
-        Decode and display the cover image fetched by the worker, or
-        fall back to the TV emoji placeholder if none is available.
+        Display the poster image in the cover box. Show the TV placeholder if no image is available.
         """
         if not cover_image_b64:
             self._cover_label.setText("📺")
@@ -401,6 +430,90 @@ class ResultScreen(QWidget):
         except Exception:
             self._cover_label.setText("📺")
             self._cover_label.setPixmap(QPixmap())
+
+    def _set_banner_image(self, image_b64: str | None) -> None:
+        """
+        Load the banner image (or AniList banner as a fallback) into the banner widget.
+        """
+        if not image_b64:
+            self._banner_image.set_pixmap(None)
+            return
+
+        try:
+            image_bytes = base64.b64decode(image_b64)
+            pixmap = QPixmap()
+            pixmap.loadFromData(image_bytes)
+            if pixmap.isNull():
+                raise ValueError("Empty pixmap")
+            self._banner_image.set_pixmap(pixmap)
+        except Exception:
+            self._banner_image.set_pixmap(None)
+
+    def _set_fitted_title(self, label: QLabel, text: str, available_width: int, max_px: int, min_px: int = 14) -> None:
+        """
+        set the title text, keeping the default size unless it needs to be reduced.
+        """
+        label.setText(text)
+
+        chosen_px = min_px
+        for px in range(max_px, min_px - 1, -1):
+            font = QFont()
+            font.setPixelSize(px)
+            # safty buffer
+            if QFontMetrics(font).horizontalAdvance(text) <= available_width - 6:
+                chosen_px = px
+                break
+
+        label.setStyleSheet(f"""
+            QLabel {{
+                color: {theme.TEXT_PRIMARY};
+                font-size: {chosen_px}px;
+                font-weight: 500;
+            }}
+        """)
+
+    def _populate_badges(self, row: QHBoxLayout, verdict: dict) -> None:
+        """
+        Fill a season/episode/timestamp badges row from the verdict. 
+
+        Used for both cases, with episode thumbnail or anime banner.
+        """
+        while row.count():
+            item = row.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        season = verdict.get("season")
+        if season:
+            badge = QLabel(season)
+            badge.setStyleSheet(theme.badge_season_style())
+            row.addWidget(badge)
+
+        episode = verdict.get("episode")
+        if episode is not None:
+            badge = QLabel(f"Episode {episode}")
+            badge.setStyleSheet(theme.badge_ep_style())
+            row.addWidget(badge)
+
+        timestamp = verdict.get("timestamp")
+        if timestamp:
+            badge = QLabel(f"⏱ {timestamp}")
+            badge.setStyleSheet(theme.badge_ts_style())
+            row.addWidget(badge)
+
+        ts_range = verdict.get("timestamp_range")
+        if ts_range:
+            badge = QLabel(f"⏱ {ts_range}")
+            badge.setStyleSheet(theme.badge_range_style())
+            row.addWidget(badge)
+
+        # Year - same row as the others, but pushed to right 
+        year = verdict.get("year")
+        if year:
+            row.addStretch()
+            badge = QLabel(str(year))
+            badge.setStyleSheet(theme.year_badge_style())
+            row.addWidget(badge)
 
     def _set_background(self, cover_image_b64: str | None) -> None:
         """
@@ -461,4 +574,3 @@ class ResultScreen(QWidget):
     def _update_stat(self, frame: QFrame, value: str, sub: str) -> None:
         frame.findChild(QLabel, "stat_value").setText(value)
         frame.findChild(QLabel, "stat_sub").setText(sub)
-        
