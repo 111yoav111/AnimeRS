@@ -95,6 +95,11 @@ def _from_video(path: Path, max_frames: int | None = None) -> tuple[list[bytes],
     else:
         frames_to_give = _count_frames_for_duration(duration_sec)
 
+    # Ensure there's room for both the first and a near-end frame. If only
+    # one frame would be extracted, increase it to two.
+    if total_frames and total_frames > 1:
+        frames_to_give = max(frames_to_give, 2)
+
     # Calc skip - dynamic, based on vid duration
     if total_frames and total_frames > frames_to_give:
         skip = max(1, total_frames // frames_to_give)
@@ -105,16 +110,31 @@ def _from_video(path: Path, max_frames: int | None = None) -> tuple[list[bytes],
         duration_sec, total_frames, frames_to_give, skip, path.name
     )
     frames: list[bytes] = []
+    captured_indices: list[int] = []
     for i, raw in enumerate(iio.imiter(str(path))):
         if i % skip == 0:
             try:
                 frames.append(_encode(Image.fromarray(raw)))
+                captured_indices.append(i)
                 logger.debug("Added frame %d", i)
             except Exception as exc:
                 logger.debug("Skipped frame %d: %s", i, exc)
 
             if len(frames) >= frames_to_give:
                 break
+
+    #Grab a frame close to the true end and use it in place of that last sample instead.
+    if frames and total_frames and total_frames > 1:
+        last_index = captured_indices[-1] if captured_indices else 0
+        near_end_index = max(0, total_frames - 2)  # -2: the very last frame is sometimes truncated/undecodable
+        if near_end_index - last_index > max(1, skip // 2):
+            try:
+                end_raw = iio.imread(str(path), index=near_end_index)
+                frames[-1] = _encode(Image.fromarray(end_raw))
+                logger.debug("Replaced last frame with near-end frame %d (was %d)", near_end_index, last_index)
+            except Exception as exc:
+                logger.debug("Could not grab near-end frame %d, keeping original: %s", near_end_index, exc)
+
     return frames, duration_sec
 
 
@@ -138,7 +158,7 @@ def extract_frames(path: str | Path, max_frames: int | None = None) -> tuple[lis
     if not path.exists():
         raise FileNotFoundError(f"Input file not found: {path}")
     if path.suffix.lower() in _STILL_EXTENSIONS:
-        return _is_image(path), 0.0  # ← still image has no duration
+        return _is_image(path), 0.0  # still image has no duration
 
     frames, duration_sec = _from_video(path, max_frames=max_frames)
     if not frames:
