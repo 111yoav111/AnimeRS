@@ -80,8 +80,8 @@ RADIUS_DOT_BTN = 6   # frame dots
  
 BORDER_WIDTH = 1
  
-COVER_W = 72
-COVER_H = 100
+COVER_W = 96
+COVER_H = 132
  
  
 # Size
@@ -278,10 +278,11 @@ def year_badge_style() -> str:
         QLabel {{
             background: {BG_ELEVATED};
             border: 1px solid {BORDER_DEFAULT};
-            border-radius: {RADIUS_APP}px;
-            padding: 3px 10px;
+            border-radius: 6px;
+            padding: 4px 10px;
             font-size: {FONT_SM}px;
             color: {TEXT_MUTED};
+            font-weight: 500;
         }}
     """
 
