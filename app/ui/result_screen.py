@@ -9,6 +9,7 @@ from PyQt6.QtGui import QPixmap, QPainter, QFont, QFontMetrics
 
 from ui import theme
 from ui.background_paint import draw_cover_background
+from ui.search_worker import QuotaWorker
 
 
 class _ImageBanner(QWidget):
@@ -48,12 +49,20 @@ class ResultScreen(QWidget):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(0)
 
-        # Back btn
-        back_btn = QPushButton("← Search again")
-        back_btn.setStyleSheet(theme.back_btn_style())
-        back_btn.setFixedHeight(28)
-        back_btn.clicked.connect(self.go_back.emit)
-        layout.addWidget(back_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(0, 0, 0, 0)
+        top_bar.setSpacing(0)
+
+        top_bar.addStretch()
+
+        self._quota_link = QPushButton("Check searches left")
+        self._quota_link.setStyleSheet(self._quota_link_style())
+        self._quota_link.setFixedHeight(28)
+        self._quota_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._quota_link.clicked.connect(self._on_check_quota)
+        top_bar.addWidget(self._quota_link, alignment=Qt.AlignmentFlag.AlignRight)
+
+        layout.addLayout(top_bar)
 
         layout.addSpacing(20)
 
@@ -301,6 +310,63 @@ class ResultScreen(QWidget):
         super().resizeEvent(event)
         # paintEvent reads the live size, so just trigger a repaint.
         self.update()
+
+    # Quota check (only if pressed by user)
+    def _on_check_quota(self) -> None:
+        """
+        User clicked the "check searchs left" button - run a backend API ask via /quota
+
+        Return how many searchs left from the total daily searchs.
+        """
+        self._quota_link.setText("Checking...")
+        self._quota_link.setEnabled(False)
+
+        self._quota_worker = QuotaWorker()
+        self._quota_worker.finished.connect(self._on_quota_checked)
+        self._quota_worker.error.connect(self._on_quota_check_failed)
+        self._quota_worker.start()
+
+    def _on_quota_checked(self, data: dict) -> None:
+        remaining = data.get("remaining")
+        quota = data.get("quota")
+        if remaining is not None and quota is not None:
+            self._quota_link.setText(f"{remaining}/{quota} searches left")
+        else:
+            self._quota_link.setText("Check searches left")
+
+        if data.get("low_quota"):
+            self._quota_link.setStyleSheet(f"""
+                QPushButton {{
+                    background: none;
+                    border: none;
+                    color: {theme.CONFIDENCE_LOW_TEXT};
+                    font-size: {theme.FONT_MD}px;
+                    font-weight: 600;
+                }}
+            """)
+        else:
+            self._quota_link.setStyleSheet(self._quota_link_style())
+
+        self._quota_link.setEnabled(True)
+
+    def _on_quota_check_failed(self, message: str) -> None:
+        self._quota_link.setText("Check searches left")
+        self._quota_link.setStyleSheet(self._quota_link_style())
+        self._quota_link.setToolTip(message)
+        self._quota_link.setEnabled(True)
+
+    def _quota_link_style(self) -> str:
+        return f"""
+            QPushButton {{
+                background: none;
+                border: none;
+                color: {theme.TEXT_MUTED};
+                font-size: {theme.FONT_MD}px;
+            }}
+            QPushButton:hover {{
+                color: {theme.TEXT_PRIMARY};
+            }}
+        """
 
     # API
 

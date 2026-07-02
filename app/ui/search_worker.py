@@ -16,6 +16,38 @@ _TIMEOUT  = 120.0  # seconds — video searches can be slow due to frame sleepin
 _ANILIST_GRAPHQL_URL = "https://graphql.anilist.co"
 
 
+class QuotaWorker(QThread):
+    """
+    Background thread that checks the user's trace.moe quota.
+
+    Only runs when requested, so it doesnt affect normal searches.
+
+    Signals
+    -------
+    finished(dict)
+        {quota, quota_used, remaining, low_quota}
+    error(str)
+        Human-readable error message on failure.
+    """
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def run(self) -> None:
+        try:
+            with httpx.Client(timeout=8.0) as client:
+                resp = client.get(f"{_API_BASE}/quota")
+                resp.raise_for_status()
+                self.finished.emit(resp.json())
+        except httpx.ConnectError:
+            self.error.emit("Could not connect to the backend.")
+        except httpx.TimeoutException:
+            self.error.emit("Request timed out.")
+        except httpx.HTTPStatusError as exc:
+            self.error.emit(f"Server returned an error: {exc.response.status_code}")
+        except Exception as exc:
+            self.error.emit(f"Error: {exc}")
+
+
 class SearchWorker(QThread):
     """
     Background thread for a single search request, talks with the FastAPI backend.
