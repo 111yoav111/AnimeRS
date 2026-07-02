@@ -51,17 +51,12 @@ def search(image_bytes: bytes) -> list[dict]:
     if config.TRACE_MOE_CUT_BORDERS:
         params["cutBorders"] = ""
 
-    headers = {}
-    if config.TRACE_MOE_API_KEY:
-        headers["x-trace-key"] = config.TRACE_MOE_API_KEY
-
     files = {"image": image_bytes}
 
     resp = httpx.post(
         f"{config.TRACE_MOE_BASE_URL}/search",
         params=params,
         files=files,
-        headers=headers,
         timeout=config.TRACE_MOE_TIMER,
     )
     resp.raise_for_status()

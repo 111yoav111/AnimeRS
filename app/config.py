@@ -1,5 +1,4 @@
 # ---------------trace.moe------------------
-TRACE_MOE_API_KEY = None  # API key, optinal 
 TRACE_MOE_BASE_URL = "https://api.trace.moe"  # API path
 TRACE_MOE_CUT_BORDERS = True  # cut borders of img
 TRACE_MOE_TIMER = 8.0  # max seconds of waiting for response
