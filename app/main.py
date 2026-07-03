@@ -123,14 +123,24 @@ async def search_paste():
 # Run uvicorn main:app --reload to start the API server only.
 if __name__ == "__main__":
     import sys
+    from pathlib import Path
     from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtGui import QIcon
     from ui.main_window import MainWindow
 
     qt_app = QApplication(sys.argv)
     qt_app.setStyle("Fusion")
 
+    # App/taskbar icon - logo at ui/assets/app_icon.png. 
+    # Skips if no icon found.
+    icon_path = Path(__file__).parent / "ui" / "assets" / "app_icon.png"
+    if icon_path.exists():
+        icon = QIcon(str(icon_path))
+        qt_app.setWindowIcon(icon)
+
     window = MainWindow()
+    if icon_path.exists():
+        window.setWindowIcon(icon)
     window.show()
 
     sys.exit(qt_app.exec())
-    
