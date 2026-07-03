@@ -89,7 +89,7 @@ class SearchWorker(QThread):
             # so everything is ready when the result screen shows
             animelist_id = verdict.get("animelist_id")
             if animelist_id and animelist_id != "Unknown":
-                cover_b64, year, episode_thumb_b64, banner_b64 = self._fetch_images(
+                cover_b64, year, episode_thumb_b64, banner_b64, description, episode_title = self._fetch_images(
                     animelist_id, verdict.get("episode")
                 )
                 if cover_b64:
@@ -100,6 +100,10 @@ class SearchWorker(QThread):
                     verdict["episode_thumb_b64"] = episode_thumb_b64
                 if banner_b64:
                     verdict["banner_image_b64"] = banner_b64
+                if description:
+                    verdict["description"] = description
+                if episode_title:
+                    verdict["episode_title"] = episode_title
 
             self.finished.emit(verdict)
 
@@ -118,7 +122,7 @@ class SearchWorker(QThread):
 
     def _fetch_images(
         self, animelist_id, episode: Optional[int] = None
-    ) -> tuple[Optional[str], Optional[int], Optional[str], Optional[str]]:
+    ) -> tuple[Optional[str], Optional[int], Optional[str], Optional[str], Optional[str], Optional[str]]:
         """
         Fetch the anime cover image, release year, episode thumbnail, and
         AniList banner image.
@@ -128,14 +132,13 @@ class SearchWorker(QThread):
 
         The episode thumbnail is taken from AniList's `streamingEpisodes` list,
         which usually matches the requested episode but is not guaranteed.
-
-        Images are returned as base64 strings so they can be passed through a
-        plain dict via pyqtSignal.
         """
         cover_b64: Optional[str] = None
         year: Optional[int] = None
         episode_thumb_b64: Optional[str] = None
         banner_b64: Optional[str] = None
+        description: Optional[str] = None
+        episode_title: Optional[str] = None
 
         query = """
         query ($id: Int) {
@@ -145,6 +148,7 @@ class SearchWorker(QThread):
                 }
                 bannerImage
                 seasonYear
+                description(asHtml: false)
                 streamingEpisodes {
                     title
                     thumbnail
@@ -163,16 +167,19 @@ class SearchWorker(QThread):
             media = data.get("data", {}).get("Media", {}) or {}
         except Exception as exc:
             logger.warning("AniList metadata lookup failed for id=%s: %s", animelist_id, exc)
-            return None, None, None, None
+            return None, None, None, None, None, None
 
         cover_url = (media.get("coverImage") or {}).get("large")
         banner_url = media.get("bannerImage")
         year = media.get("seasonYear")
+        description = media.get("description") or None
 
         episode_thumb_url = None
         streaming_episodes = media.get("streamingEpisodes") or []
         if episode and 1 <= episode <= len(streaming_episodes):
-            episode_thumb_url = streaming_episodes[episode - 1].get("thumbnail")
+            episode_data = streaming_episodes[episode - 1]
+            episode_thumb_url = episode_data.get("thumbnail")
+            episode_title = episode_data.get("title") or None
 
         if cover_url:
             try:
@@ -201,7 +208,7 @@ class SearchWorker(QThread):
             except Exception as exc:
                 logger.warning("Banner image download failed: %s", exc)
 
-        return cover_b64, year, episode_thumb_b64, banner_b64
+        return cover_b64, year, episode_thumb_b64, banner_b64, description, episode_title
 
     def _search_file(self, path: str) -> dict:
         with open(path, "rb") as f:
