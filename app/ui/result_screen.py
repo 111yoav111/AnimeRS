@@ -1,8 +1,9 @@
 import base64
+import re
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QFrame, QPushButton, QProgressBar, QSizePolicy
+    QFrame, QPushButton, QProgressBar, QSizePolicy, QDialog, QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QFont, QFontMetrics
@@ -10,6 +11,19 @@ from PyQt6.QtGui import QPixmap, QPainter, QFont, QFontMetrics
 from ui import theme
 from ui.background_paint import draw_cover_background
 from ui.search_worker import QuotaWorker
+
+
+def _clean_anilist_text(text: str | None) -> str:
+    """
+    AniList descriptions can still carry stray HTML/markdown even with
+    asHtml: false requested - strip it down to plain, readable text.
+    """
+    if not text:
+        return ""
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("__", "").replace("~!", "").replace("!~", "")
+    return text.strip()
 
 
 class _ImageBanner(QWidget):
@@ -44,6 +58,9 @@ class ResultScreen(QWidget):
         super().__init__(parent)
 
         self._bg_pixmap = None
+        self._info_title = ""
+        self._info_description = ""
+        self._info_episode_title = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -164,6 +181,30 @@ class ResultScreen(QWidget):
         self._banner_image = _ImageBanner()
         self._banner_image.setFixedHeight(150)
         banner_outer.addWidget(self._banner_image)
+
+        # Info btn in the images top-left corner. Parent it to the banner.Ad
+        # Hidden by default - only shown when we actually have something to show.
+        self._info_btn = QPushButton("i", self._banner_image)
+        self._info_btn.setFixedSize(24, 24)
+        self._info_btn.move(12, 12)
+        self._info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._info_btn.setToolTip("About this anime")
+        self._info_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(0, 0, 0, 160);
+                border: 1px solid rgba(255, 255, 255, 60);
+                border-radius: 12px;
+                color: {theme.TEXT_PRIMARY};
+                font-size: {theme.FONT_SM}px;
+                font-weight: 700;
+                font-style: italic;
+            }}
+            QPushButton:hover {{
+                background: rgba(0, 0, 0, 210);
+            }}
+        """)
+        self._info_btn.setVisible(False)
+        self._info_btn.clicked.connect(self._on_show_info)
 
         # Title + native title + season/episode/timestamp/year badges, below the image
         banner_meta = QWidget()
@@ -355,6 +396,50 @@ class ResultScreen(QWidget):
         self._quota_link.setToolTip(message)
         self._quota_link.setEnabled(True)
 
+    def _on_show_info(self) -> None:
+        """
+        User clicked the info icon on the banner - show explantion about anime.
+        This is the series general premise AniList description...
+        """
+        dialog = QDialog(self)
+        dialog.setWindowTitle("About this anime")
+        dialog.setFixedSize(380, 340)
+        dialog.setStyleSheet(f"background: {theme.BG_APP}; color: {theme.TEXT_PRIMARY};")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+
+        heading = QLabel(self._info_title or "About this anime")
+        heading.setWordWrap(True)
+        heading.setStyleSheet(f"font-size: {theme.FONT_LG}px; font-weight: 600; color: {theme.TEXT_PRIMARY};")
+        layout.addWidget(heading)
+
+        if self._info_episode_title:
+            ep_label = QLabel(self._info_episode_title)
+            ep_label.setWordWrap(True)
+            ep_label.setStyleSheet(f"color: {theme.ACCENT}; font-size: {theme.FONT_SM}px; font-weight: 600;")
+            layout.addWidget(ep_label)
+
+        # Scrollable
+        # dialog shouldnt just clip it.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        body = QLabel(self._info_description or "No description available for this anime.")
+        body.setWordWrap(True)
+        body.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_SM}px; background: transparent;")
+        scroll.setWidget(body)
+        layout.addWidget(scroll, stretch=1)
+
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(theme.browse_btn_style())
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+
+        dialog.exec()
+
     def _quota_link_style(self) -> str:
         return f"""
             QPushButton {{
@@ -380,6 +465,7 @@ class ResultScreen(QWidget):
             self._no_match.setVisible(True)
             self._quota_reminder.setVisible(False)
             self._quota_low_warning.setVisible(False)
+            self._info_btn.setVisible(False)
             self._set_background(None)
             return
 
@@ -394,6 +480,12 @@ class ResultScreen(QWidget):
         )
         native = verdict.get("Native Title", "")
         native_display = native if native and native != "Unknown" else ""
+
+        # info popup - include some basic info abou thte anime.
+        self._info_title = title
+        self._info_description = _clean_anilist_text(verdict.get("description"))
+        self._info_episode_title = verdict.get("episode_title")
+        self._info_btn.setVisible(bool(self._info_description or self._info_episode_title))
 
         cover_b64 = verdict.get("cover_image_b64")
         episode_thumb_b64 = verdict.get("episode_thumb_b64")
@@ -640,3 +732,4 @@ class ResultScreen(QWidget):
     def _update_stat(self, frame: QFrame, value: str, sub: str) -> None:
         frame.findChild(QLabel, "stat_value").setText(value)
         frame.findChild(QLabel, "stat_sub").setText(sub)
+        
