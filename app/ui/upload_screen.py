@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import (
     QFrame, QPushButton, QFileDialog, QProgressBar, QSizePolicy,
     QDialog, QSpinBox, QGraphicsOpacityEffect
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent, QPainter, QFontMetrics
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QTimer
+from PyQt6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent, QPainter, QFontMetrics, QPixmap
 
 from ui import theme
 from ui.background_paint import draw_cover_background, load_pixmap
@@ -15,6 +15,19 @@ from ui.background_paint import draw_cover_background, load_pixmap
 # The upload screens background image - only this file.
 _BG_IMAGE_PATH = Path(__file__).parent / "assets" / "bg_image.png"
 
+# Running/cartwheel animation shown during "Analyzing frames".
+# Uses pre-cut, equally sized frames (not a sprite sheet that is sliced at runtime).
+# Cycles through frames with a timer, and falls back to an emoji if assets are missing.
+_RUN_CYCLE_DIR = Path(__file__).parent / "assets" / "run_cycle"
+_RUN_CYCLE_FRAME_COUNT = 7
+
+# Horizontal movement speed (pixels per second)
+_WALK_SPEED_PX_PER_SEC = 45
+
+# Pose cycle timing: how often the 7-frame animation loops.
+# This is independent from full screen traversal time, so the character
+# performs multiple steps per crossing instead of a single cycle.
+_POSE_CYCLE_MS = 950
 
 # Allowed formats for the file dialog filter
 _ALLOWED_FORMATS = "Media files (*.jpg *.jpeg *.png *.webp *.bmp *.tiff *.tif *.gif *.mp4 *.mkv *.webm *.mov *.avi)"
@@ -209,14 +222,21 @@ class UploadScreen(QWidget):
 
         card_layout.addSpacing(16)
 
-        # Browse btn
-        browse_btn = QPushButton("Browse files")
-        browse_btn.setStyleSheet(theme.browse_btn_style())
-        browse_btn.setFixedWidth(160)
-        browse_btn.clicked.connect(self._browse)
-        card_layout.addWidget(browse_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        # Wrap everything below in one container so hiding it also removes the
+        # layout spacing, keeping the transition clean.
+        self._input_controls = QWidget()
+        input_controls_layout = QVBoxLayout(self._input_controls)
+        input_controls_layout.setContentsMargins(0, 0, 0, 0)
+        input_controls_layout.setSpacing(0)
 
-        card_layout.addSpacing(16)
+        # Browse btn
+        self._browse_btn = QPushButton("Browse files")
+        self._browse_btn.setStyleSheet(theme.browse_btn_style())
+        self._browse_btn.setFixedWidth(160)
+        self._browse_btn.clicked.connect(self._browse)
+        input_controls_layout.addWidget(self._browse_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        input_controls_layout.addSpacing(16)
 
         # Video options row (hidden until a video is selected)
         self._video_options = QWidget()
@@ -246,7 +266,7 @@ class UploadScreen(QWidget):
         video_opts_layout.addWidget(change_frames_btn)
         video_opts_layout.addStretch()
 
-        card_layout.addWidget(self._video_options)
+        input_controls_layout.addWidget(self._video_options)
 
         self._video_opts_opacity = QGraphicsOpacityEffect(self._video_options)
         self._video_options.setGraphicsEffect(self._video_opts_opacity)
@@ -256,7 +276,7 @@ class UploadScreen(QWidget):
         self._video_opts_fade.setDuration(220)
         self._video_opts_fade.setEasingCurve(QEasingCurve.Type.InOutQuad)
 
-        card_layout.addSpacing(8)
+        input_controls_layout.addSpacing(8)
 
         # Search button (hidden until a file is selected)
         self._search_btn = QPushButton("Search")
@@ -264,32 +284,81 @@ class UploadScreen(QWidget):
         self._search_btn.setFixedWidth(160)
         self._search_btn.setVisible(False)
         self._search_btn.clicked.connect(self._on_search)
-        card_layout.addWidget(self._search_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        input_controls_layout.addWidget(self._search_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        card_layout.addWidget(self._input_controls)
 
         card_layout.addSpacing(16)
 
-        # Progress section (hidden until search starts)
+        # Progress section, shown while searching. The input controls are hidden
+        # since they aren't usable during analysis.
         self._progress_widget = QWidget()
         self._progress_widget.setVisible(False)
         prog_layout = QVBoxLayout(self._progress_widget)
-        prog_layout.setContentsMargins(0, 0, 0, 0)
+        prog_layout.setContentsMargins(0, 4, 0, 4)
         prog_layout.setSpacing(8)
 
-        prog_top = QHBoxLayout()
         prog_analyzing = QLabel("Analyzing frames")
-        prog_analyzing.setStyleSheet(f"color: {theme.TEXT_DIM}; font-size: {theme.FONT_SM}px;")
-        prog_top.addWidget(prog_analyzing)
-        prog_top.addStretch()
-        self._prog_count = QLabel("")
-        self._prog_count.setStyleSheet(f"color: {theme.ACCENT}; font-size: {theme.FONT_SM}px;")
-        prog_top.addWidget(self._prog_count)
-        prog_layout.addLayout(prog_top)
+        prog_analyzing.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        prog_analyzing.setStyleSheet(f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BASE}px; font-weight: 500;")
+        prog_layout.addWidget(prog_analyzing)
 
+        self._prog_count = QLabel("")
+        self._prog_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._prog_count.setStyleSheet(f"color: {theme.ACCENT}; font-size: {theme.FONT_SM}px; font-weight: 600;")
+        prog_layout.addWidget(self._prog_count)
+
+        # Walking track for the loading animation. The character moves across
+        # the full width of the track while cycling through poses to create the
+        # walking effect. The animation distance is calculated when it starts,
+        # since the track's size is determined by the layout.
+        _ICON_HEIGHT = 48
+
+        self._run_frames: list[QPixmap] = []
+        for i in range(1, _RUN_CYCLE_FRAME_COUNT + 1):
+            pixmap = load_pixmap(_RUN_CYCLE_DIR / f"frame_{i}.png")
+            if pixmap is not None:
+                self._run_frames.append(pixmap.scaledToHeight(
+                    _ICON_HEIGHT, Qt.TransformationMode.SmoothTransformation
+                ))
+        self._run_icon_width = self._run_frames[0].width() if self._run_frames else 30
+
+        self._walk_track = QWidget()
+        self._walk_track.setFixedHeight(_ICON_HEIGHT)
+        self._walk_track.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self._run_frame_index = 0
+        self._run_icon = QLabel(self._walk_track)
+        self._run_icon.setFixedSize(self._run_icon_width, _ICON_HEIGHT)
+        if self._run_frames:
+            self._run_icon.setPixmap(self._run_frames[0])
+        else:
+            self._run_icon.setText("🔎")
+            self._run_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._run_icon.setStyleSheet("font-size: 22px;")
+        self._run_icon.move(0, 0)
+
+        # Movement and pose are driven by the same timer so they always stay in
+        # sync. The current pose is based on the character's position along the
+        # track, creating a natural walk cycle
+        self._walk_elapsed_ms = 0
+        self._walk_duration_ms = 1000  # recomputed in start_progress() from real track width
+        self._walk_timer = QTimer(self)
+        self._walk_timer.timeout.connect(self._advance_walk)
+        self._walk_tick_ms = 30  # ~33fps - smooth enough to not look like a slideshow bs
+
+        prog_layout.addWidget(self._walk_track)
+
+        bar_row = QWidget()
+        bar_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        bar_row_layout = QVBoxLayout(bar_row)
+        bar_row_layout.setContentsMargins(0, 4, 0, 0)
         self._progress_bar = QProgressBar()
         self._progress_bar.setTextVisible(False)
-        self._progress_bar.setFixedHeight(3)
+        self._progress_bar.setFixedHeight(6)
         self._progress_bar.setStyleSheet(theme.progress_bar_style())
-        prog_layout.addWidget(self._progress_bar)
+        bar_row_layout.addWidget(self._progress_bar)
+        prog_layout.addWidget(bar_row)
 
         card_layout.addWidget(self._progress_widget)
 
@@ -325,6 +394,28 @@ class UploadScreen(QWidget):
         margin = 10
         x = self._drop_zone.width() - self._cancel_btn.width() - margin
         self._cancel_btn.move(max(0, x), margin)
+
+    def _advance_walk(self) -> None:
+        """
+        Single tick of the walk animation.
+
+        A single incrementing clock drives both position and pose. The pose
+        cycles faster than the full walk duration, allowing multiple visible
+        steps during one crossing while keeping movement and animation fully
+        in sync.
+        """
+        self._walk_elapsed_ms += self._walk_tick_ms
+
+        t_pos = (self._walk_elapsed_ms % self._walk_duration_ms) / self._walk_duration_ms
+        distance = max(self._walk_track.width() - self._run_icon_width, 0)
+        self._run_icon.move(int(t_pos * distance), 0)
+
+        if self._run_frames:
+            t_pose = (self._walk_elapsed_ms % _POSE_CYCLE_MS) / _POSE_CYCLE_MS
+            frame_index = min(int(t_pose * len(self._run_frames)), len(self._run_frames) - 1)
+            if frame_index != self._run_frame_index:
+                self._run_frame_index = frame_index
+                self._run_icon.setPixmap(self._run_frames[frame_index])
 
     # Drop zone events
 
@@ -462,19 +553,60 @@ class UploadScreen(QWidget):
 
     # Progress API
 
-    def start_progress(self, total_frames: int) -> None:
-        self._progress_bar.setMaximum(max(total_frames, 1))
-        self._progress_bar.setValue(0)
-        self._prog_count.setText("Analyzing...")
+    def start_progress(self, total_frames: Optional[int] = None) -> None:
+        """
+        Analysis has started, so all search/browse controls are hidden and the
+        progress display takes the full space. Nothing is actionable until the
+        process completes.
+
+        total_frames may be None because the backend search is a single
+        blocking call and does not stream progress. When the frame count is
+        unknown, an indeterminate progress bar is shown instead of an incorrect
+        fixed range.
+        """
+        if total_frames and total_frames > 0:
+            self._progress_bar.setRange(0, total_frames)
+            self._progress_bar.setValue(0)
+            self._prog_count.setText(f"Frame 1 of {total_frames}")
+        else:
+            self._progress_bar.setRange(0, 0)  # indeterminate/marquee mode
+            self._prog_count.setText("Please wait...")
         self._progress_widget.setVisible(True)
 
+        self._run_frame_index = 0
+        if self._run_frames:
+            self._run_icon.setPixmap(self._run_frames[0])
+        self._run_icon.move(0, 0)
+
+        # Track width is determined after layout, so compute distance at runtime
+        # and scale animation duration to maintain constant pixel speed.
+        distance = max(self._walk_track.width() - self._run_icon_width, 10)
+        self._walk_duration_ms = max(int(distance / _WALK_SPEED_PX_PER_SEC * 1000), 1)
+        self._walk_elapsed_ms = 0
+        self._walk_timer.start(self._walk_tick_ms)
+
+        self._input_controls.setVisible(False)
+        self._cancel_btn.setVisible(False)
+
+        # Qt grows widgets automatically but doesn't reliably shrink them, so
+        # force a resize when sizeHint changes.
+        self._input_controls.adjustSize()
+        self._input_controls.updateGeometry()
+        self._card.layout().invalidate()
+        self._card.layout().activate()
+        self.layout().invalidate()
+        self.layout().activate()
+
     def update_progress(self, frame_index: int) -> None:
+        total = self._progress_bar.maximum()
         self._progress_bar.setValue(frame_index + 1)
-        self._prog_count.setText("Analyzing...")
+        self._prog_count.setText(f"Frame {min(frame_index + 1, total)} of {total}")
 
     def reset(self) -> None:
         self._progress_widget.setVisible(False)
         self._progress_bar.setValue(0)
+        self._walk_timer.stop()
+        self._input_controls.setVisible(True)
         self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False, transparent=True))
         self._upload_icon.setText("↑")
         self._upload_icon.setStyleSheet(f"color: {theme.TEXT_DEEP}; font-size: 28px;")
@@ -487,3 +619,13 @@ class UploadScreen(QWidget):
         self._fade_in_divider()
         self._current_path = ""
         self._max_frames = None
+
+        # input_controls was stuck at its previous size even after the search
+        # button was hidden, so force a resize after sizeHint changes.
+        self._input_controls.adjustSize()
+        self._input_controls.updateGeometry()
+        self._card.layout().invalidate()
+        self._card.layout().activate()
+        self.layout().invalidate()
+        self.layout().activate()
+        

@@ -5,6 +5,4 @@ venv/
 
 .env
 
-tests/*.jpg
-tests/*.png
-tests/*.jpeg
+tests/
