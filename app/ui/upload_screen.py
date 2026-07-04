@@ -298,10 +298,10 @@ class UploadScreen(QWidget):
         prog_layout.setContentsMargins(0, 4, 0, 4)
         prog_layout.setSpacing(8)
 
-        prog_analyzing = QLabel("Analyzing frames")
-        prog_analyzing.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        prog_analyzing.setStyleSheet(f"color: {theme.TEXT_PRIMARY}; font-size: {theme.FONT_BASE}px; font-weight: 500;")
-        prog_layout.addWidget(prog_analyzing)
+        self._prog_analyzing = QLabel("Analyzing frame")
+        self._prog_analyzing.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._prog_analyzing.setStyleSheet(f"color: {theme.ACCENT}; font-size: {theme.FONT_LG}px; font-weight: 600;")
+        prog_layout.addWidget(self._prog_analyzing)
 
         self._prog_count = QLabel("")
         self._prog_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -560,17 +560,32 @@ class UploadScreen(QWidget):
         process completes.
 
         total_frames may be None because the backend search is a single
-        blocking call and does not stream progress. When the frame count is
-        unknown, an indeterminate progress bar is shown instead of an incorrect
-        fixed range.
+        blocking call and does not stream progress.
+
+        Three states are supported:
+        - total_frames == 1: a still image, so "Frame 1 of 1" is shown.
+        - total_frames is None: the frame count is unknown, so an
+        indeterminate progress bar is shown.
+        - total_frames > 1: the total frame count is known, so "Analyzing N
+        frames" is shown.
+
+        Since progress is not tracked per frame, labels such as "Frame 1 of N"
+        are avoided when N > 1.
         """
-        if total_frames and total_frames > 0:
-            self._progress_bar.setRange(0, total_frames)
-            self._progress_bar.setValue(0)
-            self._prog_count.setText(f"Frame 1 of {total_frames}")
+        if total_frames == 1:
+            self._prog_analyzing.setText("Analyzing frame")
+            self._progress_bar.setRange(0, 0)  
+            self._prog_count.setText("Frame 1 of 1")
+        elif total_frames and total_frames > 1:
+            self._prog_analyzing.setText("Analyzing frames")
+            self._progress_bar.setRange(0, 0)  
+            self._prog_count.setText(f"Analyzing {total_frames} frames")
         else:
-            self._progress_bar.setRange(0, 0)  # indeterminate/marquee mode
-            self._prog_count.setText("Please wait...")
+            # Always use the plural label for videos/GIFs in Auto mode to avoid
+            # carrying over the singular from a previous image search.
+            self._prog_analyzing.setText("Analyzing frames")
+            self._progress_bar.setRange(0, 0)  
+            self._prog_count.setText("")
         self._progress_widget.setVisible(True)
 
         self._run_frame_index = 0
@@ -597,10 +612,19 @@ class UploadScreen(QWidget):
         self.layout().invalidate()
         self.layout().activate()
 
-    def update_progress(self, frame_index: int) -> None:
-        total = self._progress_bar.maximum()
+    def update_progress(self, frame_index: int, total_frames: int) -> None:
+        """
+        Called after analysis completes, when the total frame count is known.
+        Switches the progress bar from indeterminate to determinate mode.
+
+        total_frames is passed explicitly since the progress bar remains in
+        indeterminate mode during analysis, so its range doesn't reflect the
+        real frame count.
+        """
+        if self._progress_bar.maximum() != total_frames:
+            self._progress_bar.setRange(0, total_frames)
         self._progress_bar.setValue(frame_index + 1)
-        self._prog_count.setText(f"Frame {min(frame_index + 1, total)} of {total}")
+        self._prog_count.setText(f"Frame {min(frame_index + 1, total_frames)} of {total_frames}")
 
     def reset(self) -> None:
         self._progress_widget.setVisible(False)
