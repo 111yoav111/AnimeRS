@@ -4,9 +4,9 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QPushButton, QFileDialog, QProgressBar, QSizePolicy,
-    QDialog, QSpinBox
+    QDialog, QSpinBox, QGraphicsOpacityEffect
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent, QPainter
 
 from ui import theme
@@ -153,7 +153,8 @@ class UploadScreen(QWidget):
         card_layout.addSpacing(16)
 
         # Divider
-        divider = QHBoxLayout()
+        self._divider_container = QWidget()
+        divider = QHBoxLayout(self._divider_container)
         divider.setSpacing(12)
         divider.setContentsMargins(0, 0, 0, 0)
 
@@ -174,7 +175,15 @@ class UploadScreen(QWidget):
         right_line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         divider.addWidget(right_line)
 
-        card_layout.addLayout(divider)
+        card_layout.addWidget(self._divider_container)
+
+        self._divider_opacity = QGraphicsOpacityEffect(self._divider_container)
+        self._divider_container.setGraphicsEffect(self._divider_opacity)
+        self._divider_opacity.setOpacity(1.0)
+
+        self._divider_fade = QPropertyAnimation(self._divider_opacity, b"opacity")
+        self._divider_fade.setDuration(220)
+        self._divider_fade.setEasingCurve(QEasingCurve.Type.InOutQuad)
 
         card_layout.addSpacing(16)
 
@@ -308,6 +317,7 @@ class UploadScreen(QWidget):
         self._max_frames = None
         self._search_btn.setVisible(True)
         self._video_options.setVisible(False)
+        self._fade_out_divider()
 
     def _on_file_picked(self, path: str) -> None:
         """
@@ -325,6 +335,40 @@ class UploadScreen(QWidget):
         self._video_options.setVisible(is_video)
         self._frames_label.setText("Frames: Auto")
         self._search_btn.setVisible(True)
+        self._fade_out_divider()
+
+    def _fade_out_divider(self) -> None:
+        """
+        Fade the "or" divider out once a file is picked - hide it so it stops taking space in layout.
+
+        Meant to be called repeatedly, reset it once file is done.
+        """
+        if not self._divider_container.isVisible():
+            return
+        self._divider_fade.stop()
+        try:
+            self._divider_fade.finished.disconnect()
+        except TypeError:
+            pass  # nothing was connected yet
+        self._divider_fade.setStartValue(self._divider_opacity.opacity())
+        self._divider_fade.setEndValue(0.0)
+        self._divider_fade.finished.connect(lambda: self._divider_container.setVisible(False))
+        self._divider_fade.start()
+
+    def _fade_in_divider(self) -> None:
+        """
+        Bring the divider back - used on reset, when there's no file selected again.
+        """
+        self._divider_fade.stop()
+        try:
+            self._divider_fade.finished.disconnect()
+        except TypeError:
+            pass
+        self._divider_container.setVisible(True)
+        self._divider_opacity.setOpacity(0.0)
+        self._divider_fade.setStartValue(0.0)
+        self._divider_fade.setEndValue(1.0)
+        self._divider_fade.start()
 
     def _open_frame_picker(self) -> None:
         dialog = FramePickerDialog(self)
@@ -355,5 +399,6 @@ class UploadScreen(QWidget):
         self._drop_sub.setText("Screenshot, GIF, or video clip")
         self._search_btn.setVisible(False)
         self._video_options.setVisible(False)
+        self._fade_in_divider()
         self._current_path = ""
         self._max_frames = None
