@@ -29,6 +29,45 @@ def _encode(img : Image.Image) -> bytes:
     return buffer.getvalue()
 
 
+def probe_duration(path: str | Path) -> float:
+    """
+    Return a video's duration in seconds by reading its metadata without
+    decoding any frames.
+
+    Used by the UI to estimate the number of frames before extraction,
+    allowing it to display progress even when no frame count was chosen.
+
+    This logic is intentionally separate from the extraction code to avoid
+    affecting the actual extraction path. 
+    
+    Returns 0.0 if the duration cannot be determined.
+    """
+    path = Path(path)
+    try:
+        md = iio.immeta(str(path))
+        fps = md.get("fps") or md.get("average_rate") or 25
+        duration_sec = md.get("duration") or 0
+        total_frames = int(duration_sec * fps) if duration_sec else None
+    except Exception:
+        fps = 25
+        duration_sec = 0
+        total_frames = None
+
+    # fallback - count frames manually if still no duration
+    if not duration_sec or not total_frames:
+        try:
+            total_frames = iio.improps(str(path)).n_images or 0
+            duration_sec = total_frames / fps if total_frames and fps else 0
+        except Exception:
+            duration_sec = 0
+
+    # final guard against inf/NaN
+    if not duration_sec or duration_sec != duration_sec or duration_sec == float('inf'):
+        duration_sec = 0
+
+    return duration_sec
+
+
 def _count_frames_for_duration(duration_sec : float) -> int:
     """
     Decide how many frames to extract based on video duration.
@@ -95,8 +134,10 @@ def _from_video(path: Path, max_frames: int | None = None) -> tuple[list[bytes],
     else:
         frames_to_give = _count_frames_for_duration(duration_sec)
 
-    # Ensure there's room for both the first and a near-end frame. If only
-    # one frame would be extracted, increase it to two.
+    # Always guarantee room for both a true first frame AND a true near-last
+    # frame - if only 1 frame was going to be extracted (a short clip's
+    # default, or the user manually picking 1), bump to 2 so the near-end
+    # swap below doesn't end up overwriting the only frame we have.
     if total_frames and total_frames > 1:
         frames_to_give = max(frames_to_give, 2)
 
@@ -123,7 +164,13 @@ def _from_video(path: Path, max_frames: int | None = None) -> tuple[list[bytes],
             if len(frames) >= frames_to_give:
                 break
 
-    #Grab a frame close to the true end and use it in place of that last sample instead.
+    # The even-spacing loop above stops once it's collected enough frames,
+    # so the last one captured isn't necessarily anywhere near the actual
+    # end of the clip (e.g. 5 frames wanted, skip=60 -> last capture is
+    # frame 240 even if the video runs to frame 299). Grab a frame close to
+    # the true end and use it in place of that last sample instead, so the
+    # matched timestamp range can be grounded in a real trace.moe result at
+    # both ends, not an assumed duration.
     if frames and total_frames and total_frames > 1:
         last_index = captured_indices[-1] if captured_indices else 0
         near_end_index = max(0, total_frames - 2)  # -2: the very last frame is sometimes truncated/undecodable
@@ -158,7 +205,7 @@ def extract_frames(path: str | Path, max_frames: int | None = None) -> tuple[lis
     if not path.exists():
         raise FileNotFoundError(f"Input file not found: {path}")
     if path.suffix.lower() in _STILL_EXTENSIONS:
-        return _is_image(path), 0.0  # still image has no duration
+        return _is_image(path), 0.0  # image, no duration
 
     frames, duration_sec = _from_video(path, max_frames=max_frames)
     if not frames:

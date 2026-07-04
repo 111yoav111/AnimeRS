@@ -1,15 +1,18 @@
+from pathlib import Path
+
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QStackedWidget,
     QHBoxLayout, QVBoxLayout, QLabel, QMessageBox
 )
 from PyQt6.QtCore import Qt
 
+import frame_extractor
 from ui.theme import (
     BG_APP, DOT_RED, DOT_YELLOW, DOT_GREEN,
     WINDOW_WIDTH, WINDOW_HEIGHT,
     titlebar_style, app_style, credit_style,
 )
-from ui.upload_screen import UploadScreen
+from ui.upload_screen import UploadScreen, _STILL_EXTENSIONS
 from ui.result_screen import ResultScreen
 from ui.search_worker import SearchWorker
 
@@ -104,8 +107,25 @@ class MainWindow(QMainWindow):
         """
         self._current_filename = path.split("/")[-1].split("\\")[-1] if path else ""
 
-        # Show analyzing state while we wait for the backend
-        self._upload_screen.start_progress(1)
+        # Show the analyzing state while waiting for the backend. Still images
+        # are always a single frame, so display that explicitly.
+        is_still_image = Path(path).suffix.lower() in _STILL_EXTENSIONS if path else False
+
+        display_frames = max_frames
+        if is_still_image:
+            display_frames = 1
+        elif display_frames is None and path:
+            # Auto mode for videos/GIFs. Estimate the frame count from the
+            # videos duration so the UI can show meaningful progress. 
+            # If the estimate fails, fall back to an unknown count.
+            try:
+                duration = frame_extractor.probe_duration(path)
+                if duration:
+                    display_frames = frame_extractor._count_frames_for_duration(duration)
+            except Exception:
+                pass
+
+        self._upload_screen.start_progress(display_frames)
 
         self._worker = SearchWorker(file_path=path, max_frames=max_frames)
         self._worker.finished.connect(self._on_search_finished)
@@ -119,7 +139,7 @@ class MainWindow(QMainWindow):
         frames_total = verdict.get("frames_total", 1)
         self._upload_screen.start_progress(frames_total)
         for i in range(frames_total):
-            self._upload_screen.update_progress(i)
+            self._upload_screen.update_progress(i, frames_total)
 
         self._result_screen.show_result(verdict, self._current_filename)
         self.show_screen(1)
@@ -144,4 +164,3 @@ class MainWindow(QMainWindow):
         0 = upload screen, 1 = result screen.
         """
         self.stack.setCurrentIndex(index)
-        
