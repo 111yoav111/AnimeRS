@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QDialog, QSpinBox, QGraphicsOpacityEffect
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent, QPainter
+from PyQt6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent, QPainter, QFontMetrics
 
 from ui import theme
 from ui.background_paint import draw_cover_background, load_pixmap
@@ -220,7 +220,8 @@ class UploadScreen(QWidget):
 
         # Video options row (hidden until a video is selected)
         self._video_options = QWidget()
-        self._video_options.setVisible(False)
+        self._video_options.setFixedHeight(24)
+        self._video_options.setEnabled(False)
         video_opts_layout = QHBoxLayout(self._video_options)
         video_opts_layout.setContentsMargins(0, 0, 0, 0)
         video_opts_layout.setSpacing(8)
@@ -246,6 +247,14 @@ class UploadScreen(QWidget):
         video_opts_layout.addStretch()
 
         card_layout.addWidget(self._video_options)
+
+        self._video_opts_opacity = QGraphicsOpacityEffect(self._video_options)
+        self._video_options.setGraphicsEffect(self._video_opts_opacity)
+        self._video_opts_opacity.setOpacity(0.0)
+
+        self._video_opts_fade = QPropertyAnimation(self._video_opts_opacity, b"opacity")
+        self._video_opts_fade.setDuration(220)
+        self._video_opts_fade.setEasingCurve(QEasingCurve.Type.InOutQuad)
 
         card_layout.addSpacing(8)
 
@@ -346,10 +355,16 @@ class UploadScreen(QWidget):
         self._current_path = ""
         self._max_frames = None
         self._search_btn.setVisible(True)
-        self._video_options.setVisible(False)
+        self._set_video_options_visible(False)
         self._cancel_btn.setVisible(True)
         self._reposition_cancel_btn()
         self._fade_out_divider()
+
+        self._drop_zone.setStyleSheet(theme.drop_zone_style(selected=True, transparent=True))
+        self._upload_icon.setText("📋")
+        self._upload_icon.setStyleSheet(f"color: {theme.ACCENT}; font-size: 28px;")
+        self._set_drop_title("Pasted from clipboard")
+        self._drop_sub.setText("Image")
 
     def _on_file_picked(self, path: str) -> None:
         """
@@ -362,14 +377,46 @@ class UploadScreen(QWidget):
         suffix = Path(path).suffix.lower()
         is_video = suffix not in _STILL_EXTENSIONS
 
-        self._drop_title.setText(filename)
+        self._set_drop_title(filename)
         self._drop_sub.setText("Video" if is_video else "Image")
-        self._video_options.setVisible(is_video)
+        self._set_video_options_visible(is_video)
         self._frames_label.setText("Frames: Auto")
         self._search_btn.setVisible(True)
         self._cancel_btn.setVisible(True)
         self._reposition_cancel_btn()
         self._fade_out_divider()
+
+        # Show the selected state with a file specific icon.
+        self._drop_zone.setStyleSheet(theme.drop_zone_style(selected=True, transparent=True))
+        self._upload_icon.setText("🎬" if is_video else "🖼️")
+        self._upload_icon.setStyleSheet(f"color: {theme.ACCENT}; font-size: 28px;")
+
+    def _set_drop_title(self, text: str) -> None:
+        """
+        Set the drop zone title, eliding long filenames in the middle if needed
+        to fit. This keeps both the start of the name and the file extension
+        visible.
+        """
+        metrics = QFontMetrics(self._drop_title.font())
+        available_width = self._drop_zone.width() - 64  # zone padding + a safety margin
+        elided = metrics.elidedText(text, Qt.TextElideMode.ElideMiddle, max(available_width, 40))
+        self._drop_title.setText(elided)
+        self._drop_title.setToolTip(text)  # full name still available on hover
+
+    def _set_video_options_visible(self, visible: bool) -> None:
+        """
+        Fade the video options row in or out without changing its visibility.
+        Its space stays reserved so the layout doesn't shift.
+        """
+        self._video_options.setEnabled(visible)
+        self._video_opts_fade.stop()
+        try:
+            self._video_opts_fade.finished.disconnect()
+        except TypeError:
+            pass
+        self._video_opts_fade.setStartValue(self._video_opts_opacity.opacity())
+        self._video_opts_fade.setEndValue(1.0 if visible else 0.0)
+        self._video_opts_fade.start()
 
     def _fade_out_divider(self) -> None:
         """
@@ -429,10 +476,13 @@ class UploadScreen(QWidget):
         self._progress_widget.setVisible(False)
         self._progress_bar.setValue(0)
         self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False, transparent=True))
+        self._upload_icon.setText("↑")
+        self._upload_icon.setStyleSheet(f"color: {theme.TEXT_DEEP}; font-size: 28px;")
         self._drop_title.setText("Drop your file here")
+        self._drop_title.setToolTip("")
         self._drop_sub.setText("Screenshot, GIF, or video clip")
         self._search_btn.setVisible(False)
-        self._video_options.setVisible(False)
+        self._set_video_options_visible(False)
         self._cancel_btn.setVisible(False)
         self._fade_in_divider()
         self._current_path = ""

@@ -134,7 +134,17 @@ def card_style(transparent: bool = False) -> str:
     """
 
 
-def drop_zone_style(hover: bool = False, transparent: bool = False) -> str:
+def drop_zone_style(hover: bool = False, transparent: bool = False, selected: bool = False) -> str:
+    if selected:
+        # Switch from a dashed to a solid border once a file is selected to show its ready.
+        bg = "rgba(127, 119, 221, 26)" if transparent else BG_ELEVATED_2
+        return f"""
+            QFrame#drop_zone {{
+                background: {bg};
+                border: 2px solid {BORDER_ACCENT};
+                border-radius: {RADIUS_CARD}px;
+            }}
+        """
     if transparent:
         border_color = BORDER_ACCENT if hover else BORDER_DROP
         return f"""
@@ -309,7 +319,7 @@ def stat_box_style() -> str:
         }}
     """
  
-def check_search_btn_style() -> str:
+def back_btn_style() -> str:
     return f"""
         QPushButton {{
             background: none;
