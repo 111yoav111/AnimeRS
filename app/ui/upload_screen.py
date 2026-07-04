@@ -148,6 +148,28 @@ class UploadScreen(QWidget):
         self._drop_sub.setStyleSheet(f"color: {theme.TEXT_FAINT}; font-size: {theme.FONT_SM}px;")
         dz_layout.addWidget(self._drop_sub)
 
+        # Cancel button to remove the selected file before searching. It's
+        # overlaid on the drop zone and hidden until needed.
+        self._cancel_btn = QPushButton("✕", self._drop_zone)
+        self._cancel_btn.setFixedSize(24, 24)
+        self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._cancel_btn.setToolTip("Remove selected file")
+        self._cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {theme.BG_ELEVATED};
+                border: 1px solid {theme.BORDER_DEFAULT};
+                border-radius: 12px;
+                color: {theme.TEXT_MUTED};
+                font-size: {theme.FONT_SM}px;
+            }}
+            QPushButton:hover {{
+                background: {theme.BG_HOVER};
+                color: {theme.TEXT_PRIMARY};
+            }}
+        """)
+        self._cancel_btn.setVisible(False)
+        self._cancel_btn.clicked.connect(self.reset)
+
         card_layout.addWidget(self._drop_zone)
 
         card_layout.addSpacing(16)
@@ -286,6 +308,14 @@ class UploadScreen(QWidget):
         super().resizeEvent(event)
         # paintEvent reads the live size, so just trigger a repaint.
         self.update()
+        # The drop zone is resized by the layout, so position the cancel button
+        # once the final widget size is known.
+        self._reposition_cancel_btn()
+
+    def _reposition_cancel_btn(self) -> None:
+        margin = 10
+        x = self._drop_zone.width() - self._cancel_btn.width() - margin
+        self._cancel_btn.move(max(0, x), margin)
 
     # Drop zone events
 
@@ -317,6 +347,8 @@ class UploadScreen(QWidget):
         self._max_frames = None
         self._search_btn.setVisible(True)
         self._video_options.setVisible(False)
+        self._cancel_btn.setVisible(True)
+        self._reposition_cancel_btn()
         self._fade_out_divider()
 
     def _on_file_picked(self, path: str) -> None:
@@ -335,6 +367,8 @@ class UploadScreen(QWidget):
         self._video_options.setVisible(is_video)
         self._frames_label.setText("Frames: Auto")
         self._search_btn.setVisible(True)
+        self._cancel_btn.setVisible(True)
+        self._reposition_cancel_btn()
         self._fade_out_divider()
 
     def _fade_out_divider(self) -> None:
@@ -399,6 +433,7 @@ class UploadScreen(QWidget):
         self._drop_sub.setText("Screenshot, GIF, or video clip")
         self._search_btn.setVisible(False)
         self._video_options.setVisible(False)
+        self._cancel_btn.setVisible(False)
         self._fade_in_divider()
         self._current_path = ""
         self._max_frames = None
