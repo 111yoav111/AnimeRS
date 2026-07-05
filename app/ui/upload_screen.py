@@ -11,6 +11,8 @@ from PyQt6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent, QP
 
 from ui import theme
 from ui.background_paint import draw_cover_background, load_pixmap
+from ui.result_screen import _ImageBanner
+from ui.search_worker import ThumbnailWorker
 
 # The upload screens background image - only this file.
 _BG_IMAGE_PATH = Path(__file__).parent / "assets" / "bg_image.png"
@@ -144,12 +146,20 @@ class UploadScreen(QWidget):
         dz_layout = QVBoxLayout(self._drop_zone)
         dz_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dz_layout.setSpacing(12)
-        dz_layout.setContentsMargins(16, 32, 16, 32)
+        dz_layout.setContentsMargins(16, 24, 16, 24)
 
+        # Full-drop-zone preview background. Displays the selected image or
+        # video's first frame behind the drop zone's content. Hidden until a preview is ready.
+        self._upload_preview = _ImageBanner(self._drop_zone, corner_radius=theme.RADIUS_CARD)
+        self._upload_preview.setVisible(False)
+        self._upload_preview.lower()
+
+        # Center icon shown until a preview is available or if preview generation fails.
         self._upload_icon = QLabel("↑")
+        self._upload_icon.setFixedSize(64, 64)
         self._upload_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._upload_icon.setStyleSheet(f"color: {theme.TEXT_DEEP}; font-size: 28px;")
-        dz_layout.addWidget(self._upload_icon)
+        dz_layout.addWidget(self._upload_icon, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._drop_title = QLabel("Drop your file here")
         self._drop_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -158,7 +168,7 @@ class UploadScreen(QWidget):
 
         self._drop_sub = QLabel("Screenshot, GIF, or video clip")
         self._drop_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._drop_sub.setStyleSheet(f"color: {theme.TEXT_FAINT}; font-size: {theme.FONT_SM}px;")
+        self._drop_sub.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_SM}px;")
         dz_layout.addWidget(self._drop_sub)
 
         # Cancel button to remove the selected file before searching. It's
@@ -182,6 +192,7 @@ class UploadScreen(QWidget):
         """)
         self._cancel_btn.setVisible(False)
         self._cancel_btn.clicked.connect(self.reset)
+        self._cancel_btn.raise_()  # always on top, even above the preview background
 
         card_layout.addWidget(self._drop_zone)
 
@@ -386,14 +397,23 @@ class UploadScreen(QWidget):
         super().resizeEvent(event)
         # paintEvent reads the live size, so just trigger a repaint.
         self.update()
-        # The drop zone is resized by the layout, so position the cancel button
-        # once the final widget size is known.
+        # Resize the preview background and reposition the cancel button once
+        # the drop zone's layout size is known.
         self._reposition_cancel_btn()
+        self._resize_upload_preview()
 
     def _reposition_cancel_btn(self) -> None:
         margin = 10
         x = self._drop_zone.width() - self._cancel_btn.width() - margin
         self._cancel_btn.move(max(0, x), margin)
+
+    def _resize_upload_preview(self) -> None:
+        """
+        Keep the preview background covering the entire drop zone. 
+
+        It isnt part of the layout, so its geometry is updated manually.
+        """
+        self._upload_preview.setGeometry(0, 0, self._drop_zone.width(), self._drop_zone.height())
 
     def _advance_walk(self) -> None:
         """
@@ -477,10 +497,72 @@ class UploadScreen(QWidget):
         self._reposition_cancel_btn()
         self._fade_out_divider()
 
-        # Show the selected state with a file specific icon.
+        # Show emoji first - when its possible, change to the preview.
         self._drop_zone.setStyleSheet(theme.drop_zone_style(selected=True, transparent=True))
+        self._upload_preview.setVisible(False)
+        self._upload_preview.set_pixmap(None)
+        self._upload_icon.setVisible(True)
+        self._upload_icon.setPixmap(QPixmap())
         self._upload_icon.setText("🎬" if is_video else "🖼️")
         self._upload_icon.setStyleSheet(f"color: {theme.ACCENT}; font-size: 28px;")
+
+        if is_video:
+            self._start_thumbnail_worker(path)
+        else:
+            self._set_upload_preview_from_file(path)
+
+    def _set_upload_preview_from_file(self, path: str) -> None:
+        """
+        Load and display the image as a cover-cropped preview banner.
+
+        Falls back to the emoji if the image cant be read.
+        """
+        try:
+            pixmap = QPixmap(path)
+            if pixmap.isNull():
+                return
+            self._show_upload_preview(pixmap)
+        except Exception:
+            pass
+
+    def _start_thumbnail_worker(self, path: str) -> None:
+        """
+        Start a background thread to get the videos first frame. 
+        
+        The emoji fallback is already shown, and will be replaced once the frame is ready.
+        """
+        self._thumbnail_worker = ThumbnailWorker(path)
+        self._thumbnail_worker.finished.connect(
+            lambda jpeg_bytes: self._on_thumbnail_ready(path, jpeg_bytes)
+        )
+        self._thumbnail_worker.error.connect(lambda _msg: None)  # keep the emoji fallback, no popup needed
+        self._thumbnail_worker.start()
+
+    def _on_thumbnail_ready(self, path: str, jpeg_bytes: bytes) -> None:
+        """
+        Background loaded thumbnail is ready. 
+
+        Apply only if the file hasnt changed since the request started(cancel option).
+        """
+        if path != self._current_path:
+            return
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(jpeg_bytes, "JPEG"):
+            return
+        self._show_upload_preview(pixmap)
+
+    def _show_upload_preview(self, pixmap: QPixmap) -> None:
+        """
+        Switch from fallback icon to full drop zone preview background when the image is ready.
+        
+        It sits behind the layout so text renders on top.
+        """
+        self._upload_icon.setVisible(False)
+        self._resize_upload_preview()  # don't wait for the next resize event
+        self._upload_preview.set_pixmap(pixmap)
+        self._upload_preview.setVisible(True)
+        self._upload_preview.lower()
+        self._cancel_btn.raise_()
 
     def _set_drop_title(self, text: str) -> None:
         """
@@ -632,6 +714,10 @@ class UploadScreen(QWidget):
         self._walk_timer.stop()
         self._input_controls.setVisible(True)
         self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False, transparent=True))
+        self._upload_preview.setVisible(False)
+        self._upload_preview.set_pixmap(None)
+        self._upload_icon.setVisible(True)
+        self._upload_icon.setPixmap(QPixmap())
         self._upload_icon.setText("↑")
         self._upload_icon.setStyleSheet(f"color: {theme.TEXT_DEEP}; font-size: 28px;")
         self._drop_title.setText("Drop your file here")
@@ -652,4 +738,3 @@ class UploadScreen(QWidget):
         self._card.layout().activate()
         self.layout().invalidate()
         self.layout().activate()
-        

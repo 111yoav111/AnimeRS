@@ -5,8 +5,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QPushButton, QProgressBar, QSizePolicy, QDialog, QScrollArea
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap, QPainter, QFont, QFontMetrics
+from PyQt6.QtCore import Qt, pyqtSignal, QRectF
+from PyQt6.QtGui import QPixmap, QPainter, QFont, QFontMetrics, QPainterPath
 
 from ui import theme
 from ui.background_paint import draw_cover_background
@@ -31,11 +31,15 @@ class _ImageBanner(QWidget):
     Displays a pixmap scaled to cover the widget.
 
     The image automatically resizes to fill the widgets current dimensions.
+
+    corner_radius defaults to 0, preserving the original square-corner behavior.
+    Upload img/gif/vid for displaying the rounded corners.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, corner_radius: int = 0):
         super().__init__(parent)
         self._pixmap: QPixmap | None = None
+        self._corner_radius = corner_radius
 
     def set_pixmap(self, pixmap: QPixmap | None) -> None:
         self._pixmap = pixmap
@@ -45,6 +49,13 @@ class _ImageBanner(QWidget):
         if self._pixmap is not None and not self._pixmap.isNull():
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            if self._corner_radius > 0:
+                path = QPainterPath()
+                path.addRoundedRect(
+                    QRectF(self.rect()), self._corner_radius, self._corner_radius
+                )
+                painter.setClipPath(path)
             draw_cover_background(painter, self.rect(), self._pixmap)
             painter.end()
         super().paintEvent(event)

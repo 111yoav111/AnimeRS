@@ -16,6 +16,45 @@ _TIMEOUT  = 120.0  # seconds — video searches can be slow due to frame sleepin
 _ANILIST_GRAPHQL_URL = "https://graphql.anilist.co"
 
 
+class ThumbnailWorker(QThread):
+    """
+    Background thread that extracts the first frame of a video as JPEG
+    bytes for the upload preview.
+
+    Runs off the main thread to avoid blocking the UI while reading the video.
+    Raw bytes are returned instead of a QPixmap, since QPixmaps must be created on the main GUI thread.
+
+    Signals
+    -------
+    finished(bytes)
+        JPEG-encoded first frame.
+    error(str)
+        error message that huamn can read.
+    """
+    finished = pyqtSignal(bytes)
+    error = pyqtSignal(str)
+
+    def __init__(self, path: str, parent=None):
+        super().__init__(parent)
+        self._path = path
+
+    def run(self) -> None:
+        try:
+            import imageio.v3 as iio
+            from PIL import Image
+            import io
+
+            frame = iio.imread(self._path, index=0)
+            img = Image.fromarray(frame)
+            if img.mode in ("RGBA", "LA", "P"):
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=70)
+            self.finished.emit(buf.getvalue())
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
 class QuotaWorker(QThread):
     """
     Background thread that checks the user's trace.moe quota.
