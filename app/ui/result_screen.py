@@ -3,9 +3,10 @@ import re
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QFrame, QPushButton, QProgressBar, QSizePolicy, QDialog, QScrollArea
+    QFrame, QPushButton, QProgressBar, QSizePolicy, QDialog, QScrollArea,
+    QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QRectF
+from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QTimer
 from PyQt6.QtGui import QPixmap, QPainter, QFont, QFontMetrics, QPainterPath
 
 from ui import theme
@@ -72,6 +73,7 @@ class ResultScreen(QWidget):
         self._info_title = ""
         self._info_description = ""
         self._info_episode_title = ""
+        self._result_copy_text = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -81,6 +83,14 @@ class ResultScreen(QWidget):
         top_bar.setContentsMargins(0, 0, 0, 0)
         top_bar.setSpacing(0)
 
+        self._copy_btn = QPushButton("Copy result")
+        self._copy_btn.setStyleSheet(self._quota_link_style())
+        self._copy_btn.setFixedHeight(28)
+        self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_btn.setVisible(False)  # only makes sense once a result is actually shown
+        self._copy_btn.clicked.connect(self._on_copy_result)
+        top_bar.addWidget(self._copy_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+
         top_bar.addStretch()
 
         self._quota_link = QPushButton("Check searches left")
@@ -88,6 +98,12 @@ class ResultScreen(QWidget):
         self._quota_link.setFixedHeight(28)
         self._quota_link.setCursor(Qt.CursorShape.PointingHandCursor)
         self._quota_link.clicked.connect(self._on_check_quota)
+
+        # Reset the quota button label 10 seconds after a successful check.
+        # Restart the timer each time so older checks can't overwrite newer results.
+        self._quota_revert_timer = QTimer(self)
+        self._quota_revert_timer.setSingleShot(True)
+        self._quota_revert_timer.timeout.connect(self._revert_quota_button)
         top_bar.addWidget(self._quota_link, alignment=Qt.AlignmentFlag.AlignRight)
 
         layout.addLayout(top_bar)
@@ -364,12 +380,26 @@ class ResultScreen(QWidget):
         self.update()
 
     # Quota check (only if pressed by user)
+    def _on_copy_result(self) -> None:
+        """
+        Copy the current result's title, season/episode, and timestamp to the
+        clipboard as plain text.
+
+        After clicking, the button shows a "Copied!" message, then reverting to the defult label.
+        """
+        if not self._result_copy_text:
+            return
+        QApplication.clipboard().setText(self._result_copy_text)
+        self._copy_btn.setText("Copied!")
+        QTimer.singleShot(1500, lambda: self._copy_btn.setText("Copy result"))
+
     def _on_check_quota(self) -> None:
         """
         User clicked the "check searchs left" button - run a backend API ask via /quota
 
         Return how many searchs left from the total daily searchs.
         """
+        self._quota_revert_timer.stop()  # a fresh check gets its own full 10s timer
         self._quota_link.setText("Checking...")
         self._quota_link.setEnabled(False)
 
@@ -400,12 +430,18 @@ class ResultScreen(QWidget):
             self._quota_link.setStyleSheet(self._quota_link_style())
 
         self._quota_link.setEnabled(True)
+        self._quota_revert_timer.start(10000)  # back to normal 10s after showing the result
 
     def _on_quota_check_failed(self, message: str) -> None:
+        self._quota_revert_timer.stop()
         self._quota_link.setText("Check searches left")
         self._quota_link.setStyleSheet(self._quota_link_style())
         self._quota_link.setToolTip(message)
         self._quota_link.setEnabled(True)
+
+    def _revert_quota_button(self) -> None:
+        self._quota_link.setText("Check searches left")
+        self._quota_link.setStyleSheet(self._quota_link_style())
 
     def _on_show_info(self) -> None:
         """
@@ -477,6 +513,7 @@ class ResultScreen(QWidget):
             self._quota_reminder.setVisible(False)
             self._quota_low_warning.setVisible(False)
             self._info_btn.setVisible(False)
+            self._copy_btn.setVisible(False)
             self._set_background(None)
             return
 
@@ -491,6 +528,20 @@ class ResultScreen(QWidget):
         )
         native = verdict.get("Native Title", "")
         native_display = native if native and native != "Unknown" else ""
+
+        # Build the "copy result" answer.
+        copy_parts = [title]
+        season = verdict.get("season")
+        if season:
+            copy_parts.append(season)
+        episode = verdict.get("episode")
+        if episode is not None:
+            copy_parts.append(f"Episode {episode}")
+        self._result_copy_text = " - ".join(copy_parts)
+        timestamp = verdict.get("timestamp") or verdict.get("timestamp_range")
+        if timestamp:
+            self._result_copy_text += f" ({timestamp})"
+        self._copy_btn.setVisible(True)
 
         # info popup - include some basic info abou thte anime.
         self._info_title = title
@@ -743,4 +794,3 @@ class ResultScreen(QWidget):
     def _update_stat(self, frame: QFrame, value: str, sub: str) -> None:
         frame.findChild(QLabel, "stat_value").setText(value)
         frame.findChild(QLabel, "stat_sub").setText(sub)
-        
