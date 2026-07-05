@@ -14,7 +14,7 @@ from ui.theme import (
 )
 from ui.upload_screen import UploadScreen, _STILL_EXTENSIONS
 from ui.result_screen import ResultScreen
-from ui.search_worker import SearchWorker
+from ui.search_worker import ProbeWorker, SearchWorker
 
 
 class MainWindow(QMainWindow):
@@ -105,7 +105,7 @@ class MainWindow(QMainWindow):
         User clicked Search - call the worker with the file and frame count.
         max_frames is None (auto) or an int (user picked).
         """
-        self._current_filename = path.split("/")[-1].split("\\")[-1] if path else ""
+        self._current_filename = Path(path).name if path else ""
 
         # Show the analyzing state while waiting for the backend. Still images
         # are always a single frame, so display that explicitly.
@@ -114,16 +114,6 @@ class MainWindow(QMainWindow):
         display_frames = max_frames
         if is_still_image:
             display_frames = 1
-        elif display_frames is None and path:
-            # Auto mode for videos/GIFs. Estimate the frame count from the
-            # videos duration so the UI can show meaningful progress. 
-            # If the estimate fails, fall back to an unknown count.
-            try:
-                duration = frame_extractor.probe_duration(path)
-                if duration:
-                    display_frames = frame_extractor._count_frames_for_duration(duration)
-            except Exception:
-                pass
 
         self._upload_screen.start_progress(display_frames)
 
@@ -132,15 +122,27 @@ class MainWindow(QMainWindow):
         self._worker.error.connect(self._on_search_error)
         self._worker.start()
 
+        if display_frames is None and path:
+            # Auto mode for videos/GIFs. Estimate the frame count from the video's
+            # duration to improve the progress display. This runs in the background
+            # and falls back to the unknown-count state if the estimate fails.
+            self._probe_worker = ProbeWorker(path)
+            self._probe_worker.finished.connect(self._on_probe_done)
+            self._probe_worker.start()
+
+    def _on_probe_done(self, duration: float) -> None:
+        """
+        Duration probe finished - update the progress label with the
+        estimated frame count (auto mode only).
+        """
+        if duration:
+            estimated = frame_extractor.count_frames_for_duration(duration)
+            self._upload_screen.set_estimated_total(estimated)
+
     def _on_search_finished(self, verdict: dict) -> None:
         """
         Worker finished - populate result screen and switch to it.
         """
-        frames_total = verdict.get("frames_total", 1)
-        self._upload_screen.start_progress(frames_total)
-        for i in range(frames_total):
-            self._upload_screen.update_progress(i, frames_total)
-
         self._result_screen.show_result(verdict, self._current_filename)
         self.show_screen(1)
 
@@ -164,3 +166,4 @@ class MainWindow(QMainWindow):
         0 = upload screen, 1 = result screen.
         """
         self.stack.setCurrentIndex(index)
+        

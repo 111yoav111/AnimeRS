@@ -70,13 +70,16 @@ def search(image_bytes: bytes) -> list[dict]:
 
 def _fmt_timestamp(seconds: float | None) -> str:
     """
-    Convert a raw seconds float to a mm:ss string.
+    Convert a raw seconds float to a mm:ss string (h:mm:ss past an hour).
     """
     if seconds is None:
         return "00:00"
     total = int(seconds)
-    mm = total // 60
+    hh = total // 3600
+    mm = (total % 3600) // 60
     ss = total % 60
+    if hh:
+        return f"{hh:d}:{mm:02d}:{ss:02d}"
     return f"{mm:02d}:{ss:02d}"
 
 
@@ -100,6 +103,7 @@ def _clean_resp(anw: dict) -> dict:
         "Native Title": title.get("native")  or None,
         "Episode": anw.get("episode") or None,
         "Timestamp": _fmt_timestamp(anw.get("from")),
+        "from_sec": float(anw.get("from") or 0.0),  # raw seconds - consensus math uses this, strings are display only
         "Season": f"Season {season_number}" if season_number else None,
         "similarity%": int((anw.get("similarity") or 0) * 100),
         "animelist_id": anime_list.get("id") or "Unknown",

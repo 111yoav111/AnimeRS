@@ -1,11 +1,13 @@
+from pathlib import Path
 from typing import Optional
 
 import logging
 
 import httpx
-import base64
 
 from PyQt6.QtCore import QThread, pyqtSignal
+
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +15,9 @@ logger = logging.getLogger(__name__)
 _API_BASE = "http://localhost:8000"
 _TIMEOUT  = 120.0  # seconds — video searches can be slow due to frame sleeping
 
-_ANILIST_GRAPHQL_URL = "https://graphql.anilist.co"
+# Every request carries the shared local token - the backend rejects
+# anything without it (blocks drive-by browser requests - for secutit).
+_HEADERS = {"X-AnimeRS-Token": config.API_TOKEN}
 
 
 class ThumbnailWorker(QThread):
@@ -55,6 +59,32 @@ class ThumbnailWorker(QThread):
             self.error.emit(str(exc))
 
 
+class ProbeWorker(QThread):
+    """
+    Background thread that probes a video's duration for the progress UI.
+
+    Runs off the main thread since reading metadata (and its frame-counting
+    fallback) can be slow on large files and would freeze the window.
+
+    Signals
+    -------
+    finished(float)
+        Duration in seconds (0.0 if it couldn't be determined).
+    """
+    finished = pyqtSignal(float)
+
+    def __init__(self, path: str, parent=None):
+        super().__init__(parent)
+        self._path = path
+
+    def run(self) -> None:
+        try:
+            import frame_extractor
+            self.finished.emit(float(frame_extractor.probe_duration(self._path)))
+        except Exception:
+            self.finished.emit(0.0)
+
+
 class QuotaWorker(QThread):
     """
     Background thread that checks the user's trace.moe quota.
@@ -74,7 +104,7 @@ class QuotaWorker(QThread):
     def run(self) -> None:
         try:
             with httpx.Client(timeout=8.0) as client:
-                resp = client.get(f"{_API_BASE}/quota")
+                resp = client.get(f"{_API_BASE}/quota", headers=_HEADERS)
                 resp.raise_for_status()
                 self.finished.emit(resp.json())
         except httpx.ConnectError:
@@ -124,33 +154,15 @@ class SearchWorker(QThread):
             else:
                 verdict = self._search_file(self._file_path)
 
-            # Fetch cover + year + episode thumbnail + AniList banner.
-            # so everything is ready when the result screen shows
-            animelist_id = verdict.get("animelist_id")
-            if animelist_id and animelist_id != "Unknown":
-                cover_b64, year, episode_thumb_b64, banner_b64, description, episode_title = self._fetch_images(
-                    animelist_id, verdict.get("episode")
-                )
-                if cover_b64:
-                    verdict["cover_image_b64"] = cover_b64
-                if year:
-                    verdict["year"] = year
-                if episode_thumb_b64:
-                    verdict["episode_thumb_b64"] = episode_thumb_b64
-                if banner_b64:
-                    verdict["banner_image_b64"] = banner_b64
-                if description:
-                    verdict["description"] = description
-                if episode_title:
-                    verdict["episode_title"] = episode_title
-
+            # Cover + year + episode thumbnail + AniList banner + description
+            # are already attached by the backend (services/anilist.py).
             self.finished.emit(verdict)
 
         except httpx.ConnectError:
             self.error.emit(
                 "Could not connect to the backend.\n"
-                "Make sure the server is running: WILL BE CHANGED LATER\n"
-                "uvicorn main:app --reload"
+                "Start the app with: python main.py\n"
+                "(it launches the local API automatically)"
             )
         except httpx.TimeoutException:
             self.error.emit("Request timed out. file too big or backend crashed")
@@ -159,101 +171,11 @@ class SearchWorker(QThread):
         except Exception as exc:
             self.error.emit(f"Error: {exc}")
 
-    def _fetch_images(
-        self, animelist_id, episode: Optional[int] = None
-    ) -> tuple[Optional[str], Optional[int], Optional[str], Optional[str], Optional[str], Optional[str]]:
-        """
-        Fetch the anime cover image, release year, episode thumbnail, and
-        AniList banner image.
-
-        Returns (cover_b64, year, episode_thumb_b64, banner_b64). Any value may
-        be None if unavailable or an error happened.
-
-        The episode thumbnail is taken from AniList's `streamingEpisodes` list,
-        which usually matches the requested episode but is not guaranteed.
-        """
-        cover_b64: Optional[str] = None
-        year: Optional[int] = None
-        episode_thumb_b64: Optional[str] = None
-        banner_b64: Optional[str] = None
-        description: Optional[str] = None
-        episode_title: Optional[str] = None
-
-        query = """
-        query ($id: Int) {
-            Media(id: $id, type: ANIME) {
-                coverImage {
-                    large
-                }
-                bannerImage
-                seasonYear
-                description(asHtml: false)
-                streamingEpisodes {
-                    title
-                    thumbnail
-                }
-            }
-        }
-        """
-        try:
-            with httpx.Client(timeout=8.0) as client:
-                resp = client.post(
-                    _ANILIST_GRAPHQL_URL,
-                    json={"query": query, "variables": {"id": int(animelist_id)}},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            media = data.get("data", {}).get("Media", {}) or {}
-        except Exception as exc:
-            logger.warning("AniList metadata lookup failed for id=%s: %s", animelist_id, exc)
-            return None, None, None, None, None, None
-
-        cover_url = (media.get("coverImage") or {}).get("large")
-        banner_url = media.get("bannerImage")
-        year = media.get("seasonYear")
-        description = media.get("description") or None
-
-        episode_thumb_url = None
-        streaming_episodes = media.get("streamingEpisodes") or []
-        if episode and 1 <= episode <= len(streaming_episodes):
-            episode_data = streaming_episodes[episode - 1]
-            episode_thumb_url = episode_data.get("thumbnail")
-            episode_title = episode_data.get("title") or None
-
-        if cover_url:
-            try:
-                with httpx.Client(timeout=8.0) as client:
-                    img_resp = client.get(cover_url)
-                    img_resp.raise_for_status()
-                    cover_b64 = base64.b64encode(img_resp.content).decode("ascii")
-            except Exception as exc:
-                logger.warning("Cover image download failed: %s", exc)
-
-        if episode_thumb_url:
-            try:
-                with httpx.Client(timeout=8.0) as client:
-                    img_resp = client.get(episode_thumb_url)
-                    img_resp.raise_for_status()
-                    episode_thumb_b64 = base64.b64encode(img_resp.content).decode("ascii")
-            except Exception as exc:
-                logger.warning("Episode thumbnail download failed: %s", exc)
-
-        if banner_url:
-            try:
-                with httpx.Client(timeout=8.0) as client:
-                    img_resp = client.get(banner_url)
-                    img_resp.raise_for_status()
-                    banner_b64 = base64.b64encode(img_resp.content).decode("ascii")
-            except Exception as exc:
-                logger.warning("Banner image download failed: %s", exc)
-
-        return cover_b64, year, episode_thumb_b64, banner_b64, description, episode_title
-
     def _search_file(self, path: str) -> dict:
         with open(path, "rb") as f:
             file_bytes = f.read()
 
-        filename = path.split("/")[-1].split("\\")[-1]
+        filename = Path(path).name
 
         data = {}
         if self._max_frames is not None:
@@ -264,13 +186,14 @@ class SearchWorker(QThread):
                 f"{_API_BASE}/search",
                 files={"image": (filename, file_bytes)},
                 data=data,
+                headers=_HEADERS,
             )
             resp.raise_for_status()
             return resp.json()
 
     def _search_paste(self) -> dict:
         with httpx.Client(timeout=_TIMEOUT) as client:
-            resp = client.post(f"{_API_BASE}/search/paste")
+            resp = client.post(f"{_API_BASE}/search/paste", headers=_HEADERS)
             resp.raise_for_status()
             return resp.json()
         

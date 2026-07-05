@@ -10,12 +10,17 @@ logger = logging.getLogger(__name__)
 
 def _fmt_timestamp(seconds: float | None) -> str:
     """
-    Convert raw seconds to readable time -> mm:ss.
+    Convert raw seconds to readable time -> mm:ss (h:mm:ss past an hour).
     """
-    if not seconds:
+    if seconds is None:  # 0 is a real timestamp, only None means missing
         return "00:00"
     total = int(seconds)
-    return f"{total // 60:02d}:{total % 60:02d}"
+    hh = total // 3600
+    mm = (total % 3600) // 60
+    ss = total % 60
+    if hh:
+        return f"{hh:d}:{mm:02d}:{ss:02d}"
+    return f"{mm:02d}:{ss:02d}"
 
 
 def _vote(results: list[list[dict]]) -> tuple[str, list[dict]] | None:
@@ -56,11 +61,8 @@ def calc_timestamp(matches: list[dict], duration_sec: float = 0.0) -> tuple[str 
     raw_seconds = []
 
     for m in matches:
-        ts = m.get("Timestamp", "00:00")
         try:
-            parts = ts.split(":")
-            seconds = int(parts[0]) * 60 + int(parts[1])
-            raw_seconds.append(seconds)
+            raw_seconds.append(float(m.get("from_sec", 0.0)))
         except Exception:
             continue
 

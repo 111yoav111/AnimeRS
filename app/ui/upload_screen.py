@@ -694,6 +694,24 @@ class UploadScreen(QWidget):
         self.layout().invalidate()
         self.layout().activate()
 
+    def set_estimated_total(self, total_frames: int) -> None:
+        """
+        Update the progress label once the background duration probe finishes
+        (Auto mode only). Only the text changes - the bar stays indeterminate
+        since the backend doesn't stream per-frame progress.
+
+        Ignored if the progress view isn't showing anymore (search already
+        finished or was reset before the probe returned).
+        """
+        if not self._progress_widget.isVisible():
+            return
+        if total_frames == 1:
+            self._prog_analyzing.setText("Analyzing frame")
+            self._prog_count.setText("Frame 1 of 1")
+        elif total_frames and total_frames > 1:
+            self._prog_analyzing.setText("Analyzing frames")
+            self._prog_count.setText(f"Analyzing {total_frames} frames")
+
     def update_progress(self, frame_index: int, total_frames: int) -> None:
         """
         Called after analysis completes, when the total frame count is known.
@@ -738,3 +756,4 @@ class UploadScreen(QWidget):
         self._card.layout().activate()
         self.layout().invalidate()
         self.layout().activate()
+        
