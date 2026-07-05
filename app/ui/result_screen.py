@@ -331,25 +331,21 @@ class ResultScreen(QWidget):
         self._no_match.setVisible(False)
         layout.addWidget(self._no_match)
 
-        layout.addSpacing(6)
+        layout.addSpacing(10)
 
-        # Quota reminder (hidden until triggered every N searches)
+        # Quota notice shared by the session reminder and low-quota warning.
+        # Its layout space is always reserved so showing it doesn't shift the UI.
         self._quota_reminder = QLabel("")
         self._quota_reminder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._quota_reminder.setStyleSheet(f"color: {theme.CONFIDENCE_LOW_TEXT}; font-size: {theme.FONT_XS}px;")
+        self._quota_reminder.setFixedHeight(18)  # emoji glyphs render taller than text - pin the height
+        _sp = self._quota_reminder.sizePolicy()
+        _sp.setRetainSizeWhenHidden(True)
+        self._quota_reminder.setSizePolicy(_sp)
         self._quota_reminder.setVisible(False)
         layout.addWidget(self._quota_reminder)
 
         layout.addSpacing(4)
-
-        # Low quota warning (hidden until remaining searches drop low)
-        self._quota_low_warning = QLabel("")
-        self._quota_low_warning.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._quota_low_warning.setStyleSheet(f"color: {theme.CONFIDENCE_LOW_TEXT}; font-size: {theme.FONT_XS}px; font-weight: 600;")
-        self._quota_low_warning.setVisible(False)
-        layout.addWidget(self._quota_low_warning)
-
-        layout.addSpacing(6)
 
         # Try again btn
         try_again = QPushButton("↺  Try another file")
@@ -511,7 +507,6 @@ class ResultScreen(QWidget):
             self._card.setVisible(False)
             self._no_match.setVisible(True)
             self._quota_reminder.setVisible(False)
-            self._quota_low_warning.setVisible(False)
             self._info_btn.setVisible(False)
             self._copy_btn.setVisible(False)
             self._set_background(None)
@@ -599,21 +594,24 @@ class ResultScreen(QWidget):
         self._sim_bar.setValue(similarity)
         self._sim_pct.setText(f"{similarity}%")
 
-        # Quota reminder - shown every N searches when backend send it
+        # Shared quota notice. If both messages are available, the low-quota
+        # warning takes priority.
         quota_reminder = verdict.get("quota_reminder")
-        if quota_reminder:
+        low_warning = verdict.get("quota_low_warning")
+        if low_warning:
+            self._quota_reminder.setText(f"⚠ {low_warning.strip()}")
+            self._quota_reminder.setStyleSheet(
+                f"color: {theme.CONFIDENCE_LOW_TEXT}; font-size: {theme.FONT_XS}px; font-weight: 600;"
+            )
+            self._quota_reminder.setVisible(True)
+        elif quota_reminder:
             self._quota_reminder.setText(f"🔔 {quota_reminder.strip()}")
+            self._quota_reminder.setStyleSheet(
+                f"color: {theme.CONFIDENCE_LOW_TEXT}; font-size: {theme.FONT_XS}px;"
+            )
             self._quota_reminder.setVisible(True)
         else:
             self._quota_reminder.setVisible(False)
-
-        # Low quota warning - shown when remaining searches drop low
-        low_warning = verdict.get("quota_low_warning")
-        if low_warning:
-            self._quota_low_warning.setText(f"⚠ {low_warning}")
-            self._quota_low_warning.setVisible(True)
-        else:
-            self._quota_low_warning.setVisible(False)
 
     # -----helpers-----------
 
@@ -703,29 +701,35 @@ class ResultScreen(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
+        def _add(badge: QLabel) -> None:
+            # Keep badges at their intended size. This prevents Qt from shrinking
+            # them when the window becomes crowded by other stuff.
+            badge.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            row.addWidget(badge)
+
         season = verdict.get("season")
         if season:
             badge = QLabel(season)
             badge.setStyleSheet(theme.badge_season_style())
-            row.addWidget(badge)
+            _add(badge)
 
         episode = verdict.get("episode")
         if episode is not None:
             badge = QLabel(f"Episode {episode}")
             badge.setStyleSheet(theme.badge_ep_style())
-            row.addWidget(badge)
+            _add(badge)
 
         timestamp = verdict.get("timestamp")
         if timestamp:
             badge = QLabel(f"⏱ {timestamp}")
             badge.setStyleSheet(theme.badge_ts_style())
-            row.addWidget(badge)
+            _add(badge)
 
         ts_range = verdict.get("timestamp_range")
         if ts_range:
             badge = QLabel(f"⏱ {ts_range}")
             badge.setStyleSheet(theme.badge_range_style())
-            row.addWidget(badge)
+            _add(badge)
 
         # Year - same row as the others, but pushed to right 
         year = verdict.get("year")
@@ -733,7 +737,7 @@ class ResultScreen(QWidget):
             row.addStretch()
             badge = QLabel(str(year))
             badge.setStyleSheet(theme.year_badge_style())
-            row.addWidget(badge)
+            _add(badge)
 
     def _set_background(self, cover_image_b64: str | None) -> None:
         """

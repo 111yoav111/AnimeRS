@@ -29,80 +29,12 @@ def _encode(img : Image.Image) -> bytes:
     return buffer.getvalue()
 
 
-def probe_duration(path: str | Path) -> float:
+def _probe_meta(path: Path) -> tuple[float, float, int]:
     """
-    Return a video's duration in seconds by reading its metadata without
-    decoding any frames.
+    Shared metadata probe -> (fps, duration_sec, total_frames).
 
-    Used by the UI to estimate the number of frames before extraction,
-    allowing it to display progress even when no frame count was chosen.
-
-    This logic is intentionally separate from the extraction code to avoid
-    affecting the actual extraction path. 
-    
-    Returns 0.0 if the duration cannot be determined.
-    """
-    path = Path(path)
-    try:
-        md = iio.immeta(str(path))
-        fps = md.get("fps") or md.get("average_rate") or 25
-        duration_sec = md.get("duration") or 0
-        total_frames = int(duration_sec * fps) if duration_sec else None
-    except Exception:
-        fps = 25
-        duration_sec = 0
-        total_frames = None
-
-    # fallback - count frames manually if still no duration
-    if not duration_sec or not total_frames:
-        try:
-            total_frames = iio.improps(str(path)).n_images or 0
-            duration_sec = total_frames / fps if total_frames and fps else 0
-        except Exception:
-            duration_sec = 0
-
-    # final guard against inf/NaN
-    if not duration_sec or duration_sec != duration_sec or duration_sec == float('inf'):
-        duration_sec = 0
-
-    return duration_sec
-
-
-def _count_frames_for_duration(duration_sec : float) -> int:
-    """
-    Decide how many frames to extract based on video duration.
-
-    The longer the video -> more frames, capped at 16 frames to avoid diminishing returns.
-    """
-    if duration_sec < 30:
-        return 3
-    elif duration_sec < 120:  # 30 sec – 2 min
-        return 5
-    elif duration_sec < 600:  # 2 – 10 min
-        return 8
-    elif duration_sec < 1800: # 10 – 30 min
-        return 12
-    else:  # 30 min+
-        return 16
-
-
-def _is_image(path : Path) -> list[bytes]:
-    """
-    Read an image and return it as a 1-element list.
-    """
-    img = Image.open(path)
-    img.load()
-    logger.info("Image - 1 frame (%s)", path.name)
-
-    return [_encode(img)]
-
-
-def _from_video(path: Path, max_frames: int | None = None) -> tuple[list[bytes], float]:
-    """
-    Handle videos - extract evenly-spread frames from a GIF or video.
-    First and last captured frames mark the timestamp range.
-
-    max_frames: user-selected frame count. None = use dynamic logic.
+    Used by both probe_duration() and _from_video() so the fallback logic and
+    inf/NaN guards live in exactly one place.
     """
     try:
         md = iio.immeta(str(path))
@@ -128,11 +60,67 @@ def _from_video(path: Path, max_frames: int | None = None) -> tuple[list[bytes],
         duration_sec = 0
         total_frames = 0
 
+    return fps, duration_sec, int(total_frames or 0)
+
+
+def probe_duration(path: str | Path) -> float:
+    """
+    Return a video's duration in seconds by reading its metadata without
+    decoding any frames.
+
+    Used by the UI to estimate the number of frames before extraction,
+    allowing it to display progress even when no frame count was chosen.
+
+    Returns 0.0 if the duration cannot be determined.
+    """
+    path = Path(path)
+    _fps, duration_sec, _total_frames = _probe_meta(path)
+    return duration_sec
+
+
+def count_frames_for_duration(duration_sec : float) -> int:
+    """
+    Decide how many frames to extract based on video duration.
+
+    The longer the video -> more frames, capped at 16 frames to avoid diminishing returns.
+    """
+    if duration_sec < 30:
+        return 3
+    elif duration_sec < 120:  # 30 sec – 2 min
+        return 5
+    elif duration_sec < 600:  # 2 – 10 min
+        return 8
+    elif duration_sec < 1800: # 10 – 30 min
+        return 12
+    else:  # 30 min+
+        return 16
+
+
+def _load_still(path : Path) -> list[bytes]:
+    """
+    Read an image and return it as a 1-element list.
+    """
+    img = Image.open(path)
+    img.load()
+    logger.info("Image - 1 frame (%s)", path.name)
+
+    return [_encode(img)]
+
+
+def _from_video(path: Path, max_frames: int | None = None) -> tuple[list[bytes], float]:
+    """
+    Handle videos - extract evenly-spread frames from a GIF or video.
+    First and last captured frames mark the timestamp range.
+
+    max_frames: user-selected frame count. None = use dynamic logic.
+    """
+    fps, duration_sec, total_frames = _probe_meta(path)
+
     # user override takes priority, otherwise dynamic logic
     if max_frames is not None:
         frames_to_give = max_frames
     else:
-        frames_to_give = _count_frames_for_duration(duration_sec)
+        frames_to_give = count_frames_for_duration(duration_sec)
 
     # Always guarantee room for both a true first frame AND a true near-last
     # frame - if only 1 frame was going to be extracted (a short clip's
@@ -205,11 +193,11 @@ def extract_frames(path: str | Path, max_frames: int | None = None) -> tuple[lis
     if not path.exists():
         raise FileNotFoundError(f"Input file not found: {path}")
     if path.suffix.lower() in _STILL_EXTENSIONS:
-        return _is_image(path), 0.0  # image, no duration
+        return _load_still(path), 0.0  # image, no duration
 
     frames, duration_sec = _from_video(path, max_frames=max_frames)
     if not frames:
         logger.warning("No frames captured, retrying as image (%s)", path.name)
-        return _is_image(path), 0.0
+        return _load_still(path), 0.0
 
     return frames, duration_sec

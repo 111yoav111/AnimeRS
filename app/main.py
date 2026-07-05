@@ -1,20 +1,34 @@
 import asyncio
+import secrets
 import tempfile
 import threading
 from typing import Optional
 
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 
 import consensus
 import frame_extractor
 import paste
 import config
-from services import quota
+from services import anilist, quota
 
 app = FastAPI(title="AnimeRS")
+
+
+def _require_token(x_animers_token: str = Header(default="")) -> None:
+    """
+    Reject any request that doesn't carry the shared local token.
+
+    A custom header can't be sent by a plain cross-origin browser request
+    without a CORS preflight (which will fail here), so this blocks drive-by
+    web pages from triggering searches / clipboard grabs. compare_digest
+    keeps the comparison constant-time.
+    """
+    if not secrets.compare_digest(x_animers_token, config.API_TOKEN):
+        raise HTTPException(status_code=401, detail="Missing or invalid X-AnimeRS-Token header.")
 
 #  search counter - resets when the server restarts.
 _search_count = 0
@@ -24,15 +38,34 @@ _search_lock = threading.Lock()
 def _add_search_counter(result: dict) -> dict:
     """
     Increment the search counter and send a quota reminder every QUOTA_WARN_EVERY searches.
+
+    Counts *frames*, not requests - each frame costs one trace.moe search, so
+    one video request can burn up to 16 quota. 
+    The reminder fires on threshold crossings since the count can jump by more than 1 per request.
+
+    Also attaches a low-quota warning (from trace.moe /me) when the daily quota runs low.
+    Best case cenrio - a quota check failure never fails a search.
+
+    Blocking (network call) - run via asyncio.to_thread from the endpoints.
     """
     global _search_count
+    frames_used = result.get("frames_total") or 1
     with _search_lock:
-        _search_count += 1
+        before = _search_count
+        _search_count += frames_used
         count = _search_count
-    if count % config.QUOTA_WARN_EVERY == 0:
+    if count // config.QUOTA_WARN_EVERY > before // config.QUOTA_WARN_EVERY:
         result["quota_reminder"] = (
-            f"You've made {count} searches this session. "
+            f"You have used {count} trace.moe searches this session."
         )
+    try:
+        q = quota.get_quota()
+        if q.get("low_quota"):
+            result["quota_low_warning"] = (
+                f"Only {q['remaining']} trace.moe searches left today."
+            )
+    except Exception:
+        pass  # quota check is informational only
     return result
 
 
@@ -40,7 +73,7 @@ def _add_search_counter(result: dict) -> dict:
 def health():
     return {"status": "ok"}
 
-@app.get("/quota")
+@app.get("/quota", dependencies=[Depends(_require_token)])
 async def get_quota():
     """
     Return current trace.moe quota status (from /me).
@@ -52,7 +85,7 @@ async def get_quota():
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": f"Unexpected error: {exc}"})
 
-@app.post("/search")
+@app.post("/search", dependencies=[Depends(_require_token)])
 async def search(
     image: UploadFile = File(...),
     max_frames: Optional[int] = Form(None),  # None = auto, 1-16 = user override
@@ -63,6 +96,12 @@ async def search(
     suffix = Path(image.filename).suffix
     if not suffix:
         return JSONResponse(status_code=400, content={"error": "Cannot determine file type from file name."})
+    # Only formats the UI offers - anything else never reaches ffmpeg/imageio.
+    if suffix.lower() not in config.ALLOWED_EXTENSIONS:
+        return JSONResponse(status_code=400, content={"error": f"Unsupported file type: {suffix}"})
+    # Cap upload size - the whole file is held in memory.
+    if len(file_bytes) > config.MAX_UPLOAD_MB * 1024 * 1024:
+        return JSONResponse(status_code=413, content={"error": f"File too large (max {config.MAX_UPLOAD_MB} MB)."})
 
     # clamp to valid range if user provided a value
     if max_frames is not None:
@@ -75,10 +114,11 @@ async def search(
             tmp_path = Path(tmp.name)
         def run():
             frames, duration_sec = frame_extractor.extract_frames(tmp_path, max_frames=max_frames)
-            return consensus.build_verdict(frames, duration_sec)
+            verdict = consensus.build_verdict(frames, duration_sec)
+            return anilist.enrich(verdict)
         result = await asyncio.to_thread(run)
 
-        return _add_search_counter(result)
+        return await asyncio.to_thread(_add_search_counter, result)
     
     except RuntimeError as exc:
         return JSONResponse(status_code=502, content={"error": str(exc)})
@@ -91,19 +131,23 @@ async def search(
             except Exception:
                 pass
 
-@app.post("/search/paste")
+@app.post("/search/paste", dependencies=[Depends(_require_token)])
 async def search_paste():
     """
     Grab the current clipboard image and run a search.
+
+    Reads the *server machine's*(user) clipboard - token-protected so a drive-by
+    web page or another host can't trigger a silent clipboard upload.
     """
     tmp_path = None
     try:
         tmp_path = paste.grab()
         def run():
             frames, duration_sec = frame_extractor.extract_frames(tmp_path)
-            return consensus.build_verdict(frames, duration_sec)
+            verdict = consensus.build_verdict(frames, duration_sec)
+            return anilist.enrich(verdict)
         result = await asyncio.to_thread(run)
-        return _add_search_counter(result)
+        return await asyncio.to_thread(_add_search_counter, result)
     except NotImplementedError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     except RuntimeError as e:
@@ -119,14 +163,23 @@ async def search_paste():
 
 
 # Open the UI from here 
-# Run python main.py to launch app.
-# Run uvicorn main:app --reload to start the API server only.
+# Run python main.py to launch app (starts the local API automatically).
+# Run uvicorn main:app to start the API server only - set ANIMERS_TOKEN in the
+# environment for both processes in that case.
 if __name__ == "__main__":
     import sys
     from pathlib import Path
+
+    import uvicorn
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QIcon
     from ui.main_window import MainWindow
+
+    # Local API in a background thread - bound to 127.0.0.1 only, never the network.
+    # UI and API share config.API_TOKEN since it's the same process.
+    # (uvicorn skips signal-handler setup when not on the main thread.)
+    _server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=8000, log_level="warning"))
+    threading.Thread(target=_server.run, daemon=True).start()
 
     qt_app = QApplication(sys.argv)
     qt_app.setStyle("Fusion")
@@ -144,3 +197,4 @@ if __name__ == "__main__":
     window.show()
 
     sys.exit(qt_app.exec())
+    
