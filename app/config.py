@@ -25,6 +25,10 @@ MAX_FRAMES_LIMIT = 16 # cap on user selected frame count (1-16)
 # For a standalone server (uvicorn main:app), set ANIMERS_TOKEN in the environment for BOTH processes.
 API_TOKEN = os.environ.get("ANIMERS_TOKEN") or secrets.token_hex(16)
 
+# Port for the local API. main.py may move this to a free port at startup if
+# it's already taken (e.g. another program squatting on 8000).
+API_PORT = int(os.environ.get("ANIMERS_PORT", "8000"))
+
 # Upload limits
 MAX_UPLOAD_MB = 250  # reject uploads bigger than this
 

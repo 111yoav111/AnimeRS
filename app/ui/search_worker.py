@@ -11,8 +11,11 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# Base URL - FastAPI running locally
-_API_BASE = "http://localhost:8000"
+# Base URL - FastAPI running locally. Read at call time, since main.py may
+# have moved the API to a different port if 8000 was already taken.
+def _api_base() -> str:
+    return f"http://127.0.0.1:{config.API_PORT}"
+
 _TIMEOUT  = 120.0  # seconds — video searches can be slow due to frame sleeping
 
 # Every request carries the shared local token - the backend rejects
@@ -104,7 +107,7 @@ class QuotaWorker(QThread):
     def run(self) -> None:
         try:
             with httpx.Client(timeout=8.0) as client:
-                resp = client.get(f"{_API_BASE}/quota", headers=_HEADERS)
+                resp = client.get(f"{_api_base()}/quota", headers=_HEADERS)
                 resp.raise_for_status()
                 self.finished.emit(resp.json())
         except httpx.ConnectError:
@@ -183,7 +186,7 @@ class SearchWorker(QThread):
 
         with httpx.Client(timeout=_TIMEOUT) as client:
             resp = client.post(
-                f"{_API_BASE}/search",
+                f"{_api_base()}/search",
                 files={"image": (filename, file_bytes)},
                 data=data,
                 headers=_HEADERS,
@@ -193,7 +196,7 @@ class SearchWorker(QThread):
 
     def _search_paste(self) -> dict:
         with httpx.Client(timeout=_TIMEOUT) as client:
-            resp = client.post(f"{_API_BASE}/search/paste", headers=_HEADERS)
+            resp = client.post(f"{_api_base()}/search/paste", headers=_HEADERS)
             resp.raise_for_status()
             return resp.json()
         
