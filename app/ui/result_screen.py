@@ -256,7 +256,7 @@ class ResultScreen(QWidget):
         self._banner_native_label.setStyleSheet(f"color: {theme.TEXT_GHOST}; font-size: {theme.FONT_SM}px;")
         banner_meta_layout.addWidget(self._banner_native_label)
 
-        banner_meta_layout.addSpacing(12)
+        banner_meta_layout.addSpacing(6)
 
         self._banner_badges_row = QHBoxLayout()
         self._banner_badges_row.setSpacing(6)
