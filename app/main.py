@@ -167,6 +167,8 @@ async def search_paste():
 # Run uvicorn main:app to start the API server only - set ANIMERS_TOKEN in the
 # environment for both processes in that case.
 if __name__ == "__main__":
+    import os
+    import socket
     import sys
     from pathlib import Path
 
@@ -175,10 +177,36 @@ if __name__ == "__main__":
     from PyQt6.QtGui import QIcon
     from ui.main_window import MainWindow
 
+    # Packaged (PyInstaller --windowed) builds have no console, so
+    # sys.stdout/stderr are None - anything that touches them crashes
+    # (uvicorn's log formatter calls sys.stdout.isatty()). Give them a
+    # safe sink so logging/printing is a no-op instead of a crash.
+    if getattr(sys, "frozen", False):
+        if sys.stdout is None:
+            sys.stdout = open(os.devnull, "w")
+        if sys.stderr is None:
+            sys.stderr = open(os.devnull, "w")
+
+    # If the preferred port is taken (an old server still running, a second
+    # app instance, or another program), fall back to a free one. The UI reads
+    # config.API_PORT at request time, so both sides stay in sync.
+    def _free_port(preferred: int) -> int:
+        with socket.socket() as s:
+            try:
+                s.bind(("127.0.0.1", preferred))
+                return preferred
+            except OSError:
+                s.bind(("127.0.0.1", 0))  # 0 = let the OS pick any free port
+                return s.getsockname()[1]
+
+    config.API_PORT = _free_port(config.API_PORT)
+
     # Local API in a background thread - bound to 127.0.0.1 only, never the network.
     # UI and API share config.API_TOKEN since it's the same process.
     # (uvicorn skips signal-handler setup when not on the main thread.)
-    _server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=8000, log_level="warning"))
+    # log_config=None: skip uvicorn's console logging setup - there is no
+    # console in the packaged app, and its formatter breaks without one.
+    _server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=config.API_PORT, log_config=None))
     threading.Thread(target=_server.run, daemon=True).start()
 
     qt_app = QApplication(sys.argv)
@@ -197,4 +225,3 @@ if __name__ == "__main__":
     window.show()
 
     sys.exit(qt_app.exec())
-    
