@@ -1,4 +1,5 @@
 from pathlib import Path
+import platform 
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QStackedWidget,
@@ -45,17 +46,6 @@ class MainWindow(QMainWindow):
         tb_layout.setContentsMargins(16, 0, 16, 0)
         tb_layout.setSpacing(8)
 
-        for color in (DOT_RED, DOT_YELLOW, DOT_GREEN):
-            dot = QLabel()
-            dot.setFixedSize(12, 12)
-            dot.setStyleSheet(f"""
-                QLabel {{
-                    background: {color};
-                    border-radius: 6px;
-                }}
-            """)
-            tb_layout.addWidget(dot)
-
         tb_layout.addStretch()
 
         title_label = QLabel("AnimeRS")
@@ -63,11 +53,6 @@ class MainWindow(QMainWindow):
         tb_layout.addWidget(title_label)
 
         tb_layout.addStretch()
-
-        # placeholder to balance the dots on the right side
-        spacer = QWidget()
-        spacer.setFixedWidth(12 * 3 + (8 * 2))  # 3 dots + 2 gaps
-        tb_layout.addWidget(spacer)
 
         root_layout.addWidget(titlebar)
 
