@@ -1,5 +1,4 @@
 from pathlib import Path
-import platform 
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QStackedWidget,

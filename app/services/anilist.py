@@ -1,10 +1,8 @@
 from __future__ import annotations
-
 import base64
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
-
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -12,10 +10,8 @@ logger = logging.getLogger(__name__)
 _ANILIST_GRAPHQL_URL = "https://graphql.anilist.co"
 _TIMEOUT = 8.0
 
-# Identify the app instead of httpx's default UA - polite API citizenship,
-# and some Cloudflare configurations treat generic python clients worse.
 _HEADERS = {
-    "User-Agent": "AnimeRS/1.0 (https://github.com/111yoav111)",
+    "User-Agent": "AnimeRS/1.0",
     "Accept": "application/json",
 }
 
