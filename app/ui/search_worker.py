@@ -1,10 +1,7 @@
 from pathlib import Path
 from typing import Optional
-
 import logging
-
 import httpx
-
 from PyQt6.QtCore import QThread, pyqtSignal
 
 import config
