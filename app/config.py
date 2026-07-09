@@ -13,8 +13,11 @@ CONFIDENT_THRESHOLD = 95  # if trace.moe have x>95% simillarty - dont ask other 
 QUOTA_LOW_THRESHOLD = 10  # warn user when remaining searches drop to this number 
 QUOTA_WARN_EVERY = 10  # tell user every QUOTA_WARN_EVERY searches how many he made so far
 
-# Frame 
+# Frame
 MAX_FRAMES_LIMIT = 16 # cap on user selected frame count (1-16)
+
+# ---------------history------------------
+HISTORY_MAX_ENTRIES = 50  # cap on saved search history entries - oldest trimmed first
 
 # ---------------local API security------------------
 # Shared secret between the UI and the local API. Requests without this header

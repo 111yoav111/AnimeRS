@@ -348,6 +348,28 @@ def try_again_btn_style() -> str:
         }}
     """
  
+def history_btn_style() -> str:
+    return f"""
+        QPushButton {{
+            background: rgba(127, 119, 221, 24);
+            border: 1px solid rgba(127, 119, 221, 100);
+            border-radius: 14px;
+            padding: 6px 16px;
+            color: {ACCENT};
+            font-size: {FONT_SM}px;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+        }}
+        QPushButton:hover {{
+            background: rgba(127, 119, 221, 60);
+            border: 1px solid {ACCENT};
+            color: {TEXT_PRIMARY};
+        }}
+        QPushButton:pressed {{
+            background: rgba(127, 119, 221, 90);
+        }}
+    """
+
 def credit_style() -> str:
     return f"""
         QLabel {{

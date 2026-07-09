@@ -117,6 +117,36 @@ class QuotaWorker(QThread):
             self.error.emit(f"Error: {exc}")
 
 
+class HistoryWorker(QThread):
+    """
+    Background thread that fetches saved search history.
+
+    Signals
+    -------
+    finished(list)
+        Saved history entries, most recent first.
+    error(str)
+        Error message on failure.
+    """
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def run(self) -> None:
+        try:
+            with httpx.Client(timeout=8.0) as client:
+                resp = client.get(f"{_api_base()}/history", headers=_HEADERS)
+                resp.raise_for_status()
+                self.finished.emit(resp.json())
+        except httpx.ConnectError:
+            self.error.emit("Could not connect to the backend.")
+        except httpx.TimeoutException:
+            self.error.emit("Request timed out.")
+        except httpx.HTTPStatusError as exc:
+            self.error.emit(f"Server returned an error: {exc.response.status_code}")
+        except Exception as exc:
+            self.error.emit(f"Error: {exc}")
+
+
 class SearchWorker(QThread):
     """
     Background thread for a single search request, talks with the FastAPI backend.

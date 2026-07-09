@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 import consensus
 import frame_extractor
+import history
 import paste
 import config
 from services import anilist, quota
@@ -84,6 +85,13 @@ async def get_quota():
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": f"Unexpected error: {exc}"})
 
+@app.get("/history", dependencies=[Depends(_require_token)])
+async def get_history():
+    """
+    Return saved search history, most recent first.
+    """
+    return await asyncio.to_thread(history.load_history)
+
 @app.post("/search", dependencies=[Depends(_require_token)])
 async def search(
     image: UploadFile = File(...),
@@ -116,9 +124,10 @@ async def search(
             verdict = consensus.build_verdict(frames, duration_sec)
             return anilist.enrich(verdict)
         result = await asyncio.to_thread(run)
+        result = await asyncio.to_thread(_add_search_counter, result)
+        await asyncio.to_thread(history.add_entry, result, image.filename)
+        return result
 
-        return await asyncio.to_thread(_add_search_counter, result)
-    
     except RuntimeError as exc:
         return JSONResponse(status_code=502, content={"error": str(exc)})
     except Exception as exc:
@@ -146,7 +155,9 @@ async def search_paste():
             verdict = consensus.build_verdict(frames, duration_sec)
             return anilist.enrich(verdict)
         result = await asyncio.to_thread(run)
-        return await asyncio.to_thread(_add_search_counter, result)
+        result = await asyncio.to_thread(_add_search_counter, result)
+        await asyncio.to_thread(history.add_entry, result, "Clipboard image")
+        return result
     except NotImplementedError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     except RuntimeError as e:

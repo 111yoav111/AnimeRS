@@ -14,7 +14,8 @@ from ui.theme import (
 )
 from ui.upload_screen import UploadScreen, _STILL_EXTENSIONS
 from ui.result_screen import ResultScreen
-from ui.search_worker import ProbeWorker, SearchWorker
+from ui.history_screen import HistoryScreen
+from ui.search_worker import ProbeWorker, SearchWorker, HistoryWorker
 
 
 class MainWindow(QMainWindow):
@@ -26,6 +27,7 @@ class MainWindow(QMainWindow):
 
         self._current_filename = ""
         self._worker = None
+        self._history_return_index = 0  # screen to restore when leaving history
 
         root = QWidget()
         root.setObjectName("central")
@@ -60,9 +62,11 @@ class MainWindow(QMainWindow):
 
         self._upload_screen = UploadScreen()
         self._result_screen = ResultScreen()
+        self._history_screen = HistoryScreen()
 
         self.stack.addWidget(self._upload_screen)  # index 0
         self.stack.addWidget(self._result_screen)  # index 1
+        self.stack.addWidget(self._history_screen)  # index 2
 
         root_layout.addWidget(self.stack, stretch=1)
 
@@ -80,7 +84,11 @@ class MainWindow(QMainWindow):
 
         # Signals
         self._upload_screen.search_requested.connect(self._on_search_requested)
+        self._upload_screen.show_history_requested.connect(self._on_show_history)
         self._result_screen.go_back.connect(self._on_go_back)
+        self._result_screen.show_history_requested.connect(self._on_show_history)
+        self._history_screen.go_back.connect(self._on_history_back)
+        self._history_screen.entry_selected.connect(self._on_history_entry_selected)
 
     # Slots
 
@@ -143,6 +151,40 @@ class MainWindow(QMainWindow):
         """
         self._upload_screen.reset()
         self.show_screen(0)
+
+    def _on_show_history(self) -> None:
+        """
+        User clicked "History" (from upload or result screen) - fetch saved
+        searches and switch to the history screen. Remember where we came
+        from so the back button returns to the right place.
+        """
+        self._history_return_index = self.stack.currentIndex()
+
+        self._history_worker = HistoryWorker()
+        self._history_worker.finished.connect(self._on_history_loaded)
+        self._history_worker.error.connect(self._on_history_load_failed)
+        self._history_worker.start()
+
+    def _on_history_loaded(self, entries: list) -> None:
+        self._history_screen.set_entries(entries)
+        self.show_screen(2)
+
+    def _on_history_load_failed(self, message: str) -> None:
+        QMessageBox.critical(self, "Couldn't load history", message)
+
+    def _on_history_entry_selected(self, verdict: dict, filename: str) -> None:
+        """
+        User clicked a past search - reopen it on the result screen.
+        """
+        self._result_screen.show_result(verdict, filename)
+        self.show_screen(1)
+
+    def _on_history_back(self) -> None:
+        """
+        User clicked back on the history screen - return to whichever screen
+        (upload or result) it was opened from.
+        """
+        self.show_screen(self._history_return_index)
 
     def show_screen(self, index: int) -> None:
         """
