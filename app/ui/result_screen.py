@@ -65,6 +65,8 @@ class _ImageBanner(QWidget):
 class ResultScreen(QWidget):
     # Emits when user clicks back or try again
     go_back = pyqtSignal()
+    # Emits when user clicks "History"
+    show_history_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -92,6 +94,15 @@ class ResultScreen(QWidget):
         top_bar.addWidget(self._copy_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
         top_bar.addStretch()
+
+        self._history_btn = QPushButton("🕘  History")
+        self._history_btn.setStyleSheet(theme.history_btn_style())
+        self._history_btn.setFixedHeight(30)
+        self._history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._history_btn.clicked.connect(self.show_history_requested.emit)
+        top_bar.addWidget(self._history_btn, alignment=Qt.AlignmentFlag.AlignRight)
+
+        top_bar.addSpacing(12)
 
         self._quota_link = QPushButton("Check searches left")
         self._quota_link.setStyleSheet(self._quota_link_style())

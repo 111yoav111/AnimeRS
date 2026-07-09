@@ -85,6 +85,8 @@ class FramePickerDialog(QDialog):
 class UploadScreen(QWidget):
     # Emits (file_path, max_frames) — max_frames is None if user didn't set it
     search_requested = pyqtSignal(str, object)
+    # Emits when user clicks "History"
+    show_history_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -97,8 +99,23 @@ class UploadScreen(QWidget):
         self._bg_pixmap = load_pixmap(_BG_IMAGE_PATH)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 28, 24, 28)
+        layout.setContentsMargins(24, 14, 24, 28)
         layout.setSpacing(0)
+
+        # Top bar - just the history entry point, upload has nothing else up here
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(0, 0, 0, 0)
+        top_bar.addStretch()
+
+        self._history_btn = QPushButton("🕘  History")
+        self._history_btn.setStyleSheet(theme.history_btn_style())
+        self._history_btn.setFixedHeight(26)
+        self._history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._history_btn.clicked.connect(self.show_history_requested.emit)
+        top_bar.addWidget(self._history_btn, alignment=Qt.AlignmentFlag.AlignRight)
+
+        layout.addLayout(top_bar)
+        layout.addSpacing(8)
 
         # All the card stuff, drop etc...
         self._card = QFrame()
