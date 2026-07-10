@@ -107,4 +107,5 @@ def _clean_resp(anw: dict) -> dict:
         "Season": f"Season {season_number}" if season_number else None,
         "similarity%": int((anw.get("similarity") or 0) * 100),
         "animelist_id": anime_list.get("id") or "Unknown",
+        "Preview Video": anw.get("video"),
     }
