@@ -155,4 +155,5 @@ def build_verdict(frames: list[bytes], duration_sec: float = 0.0) -> dict:
         "frames_total": frames_total,
         "confident": confident,
         "animelist_id": best.get("animelist_id"),
+        "preview_video_url": best.get("Preview Video"),
     }

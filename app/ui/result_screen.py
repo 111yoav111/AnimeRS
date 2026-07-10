@@ -6,8 +6,10 @@ from PyQt6.QtWidgets import (
     QFrame, QPushButton, QProgressBar, QSizePolicy, QDialog, QScrollArea,
     QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QTimer, QUrl
 from PyQt6.QtGui import QPixmap, QPainter, QFont, QFontMetrics, QPainterPath
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 from ui import theme
 from ui.background_paint import draw_cover_background
@@ -220,6 +222,24 @@ class ResultScreen(QWidget):
         self._banner_image.setFixedHeight(150)
         banner_outer.addWidget(self._banner_image)
 
+        # Inline preview clip - overlays the banner image, autoplays muted
+        # for a few seconds, then hides itself and show banner instead.
+        self._preview_url: str | None = None
+        self._banner_video_widget = QVideoWidget(self._banner_image)
+        self._banner_video_widget.setVisible(False)
+
+        self._banner_audio_output = QAudioOutput()
+        self._banner_audio_output.setMuted(True)  # autoplay cant have sound
+        self._banner_video_player = QMediaPlayer()
+        self._banner_video_player.setAudioOutput(self._banner_audio_output)
+        self._banner_video_player.setVideoOutput(self._banner_video_widget)
+        self._banner_video_player.errorOccurred.connect(self._on_banner_preview_error)
+        self._banner_video_player.playbackStateChanged.connect(self._on_banner_playback_state_changed)
+
+        self._banner_preview_timer = QTimer(self)
+        self._banner_preview_timer.setSingleShot(True)
+        self._banner_preview_timer.timeout.connect(self._on_banner_preview_timeout)
+
         # Info btn in the images top-left corner. Parent it to the banner.Ad
         # Hidden by default - only shown when we actually have something to show.
         self._info_btn = QPushButton("i", self._banner_image)
@@ -243,6 +263,30 @@ class ResultScreen(QWidget):
         """)
         self._info_btn.setVisible(False)
         self._info_btn.clicked.connect(self._on_show_info)
+
+        # Expand btn in the image's top-right corner - opens the preview clip
+        # Hidden until a preview is available.
+        self._preview_expand_btn = QPushButton("▶", self._banner_image)
+        self._preview_expand_btn.setFixedSize(24, 24)
+        self._preview_expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._preview_expand_btn.setToolTip("Watch preview clip")
+        self._preview_expand_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(0, 0, 0, 160);
+                border: 1px solid rgba(255, 255, 255, 60);
+                border-radius: 12px;
+                color: {theme.TEXT_PRIMARY};
+                font-size: {theme.FONT_XS}px;
+            }}
+            QPushButton:hover {{
+                background: rgba(0, 0, 0, 210);
+            }}
+        """)
+        self._preview_expand_btn.setVisible(False)
+        self._preview_expand_btn.clicked.connect(self._on_open_preview_dialog)
+
+        self._info_btn.raise_()
+        self._preview_expand_btn.raise_()
 
         # Title + native title + season/episode/timestamp/year badges, below the image
         banner_meta = QWidget()
@@ -385,6 +429,13 @@ class ResultScreen(QWidget):
         super().resizeEvent(event)
         # paintEvent reads the live size, so just trigger a repaint.
         self.update()
+        self._resize_banner_video()
+
+    def _resize_banner_video(self) -> None:
+        self._banner_video_widget.setGeometry(0, 0, self._banner_image.width(), self._banner_image.height())
+        margin = 12
+        x = self._banner_image.width() - self._preview_expand_btn.width() - margin
+        self._preview_expand_btn.move(max(0, x), margin)
 
     # Quota check (only if pressed by user)
     def _on_copy_result(self) -> None:
@@ -399,6 +450,80 @@ class ResultScreen(QWidget):
         QApplication.clipboard().setText(self._result_copy_text)
         self._copy_btn.setText("Copied!")
         QTimer.singleShot(1500, lambda: self._copy_btn.setText("Copy result"))
+
+    def _on_banner_playback_state_changed(self, state) -> None:
+        """
+        Start the swap to banner countdown only once playback has actually
+        reached PlayingState - not when requested.
+        """
+        if state == QMediaPlayer.PlaybackState.PlayingState and self._banner_video_widget.isVisible():
+            self._banner_preview_timer.start(4000)
+
+    def _on_banner_preview_timeout(self) -> None:
+        """
+        The countdown is over -> swap back to the banner.
+        Hidden before stopped, so the video sink isn't torn down while still visible/painting.
+        """
+        self._banner_video_widget.setVisible(False)
+        self._banner_video_player.stop()
+
+    def _on_banner_preview_error(self, error, error_string) -> None:
+        """
+        The preview stream failed to load (dead link, network hiccup, etc.) -
+        fall back to the static banner instead of a broken black box.
+        """
+        self._banner_preview_timer.stop()
+        self._banner_video_widget.setVisible(False)
+        self._banner_video_player.stop()
+        self._preview_expand_btn.setVisible(False)
+
+    def _on_open_preview_dialog(self) -> None:
+        """
+        User clicked the expand button - replay the preview clip full-size,
+        unmuted, in its own dialog.
+        """
+        if not self._preview_url:
+            return
+
+        # full stop
+        self._banner_preview_timer.stop()
+        self._banner_video_widget.setVisible(False)
+        self._banner_video_player.stop()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Preview clip")
+        dialog.setFixedSize(400, 300)
+        dialog.setStyleSheet(f"background: {theme.BG_APP};")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        video_widget = QVideoWidget()
+        video_widget.setMinimumHeight(220)
+        layout.addWidget(video_widget, stretch=1)
+
+        player = QMediaPlayer(dialog)
+        audio = QAudioOutput(dialog)
+        player.setAudioOutput(audio)
+        player.setVideoOutput(video_widget)
+
+        # Playing it once just stops at the end of the data that was actually received.
+        # cant play it loop since the received data will crash the app.
+        player.errorOccurred.connect(lambda *_: player.stop())
+        player.setSource(QUrl(self._preview_url))
+        player.play()
+
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(theme.browse_btn_style())
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+
+        dialog.exec()
+        player.stop()
+        # Defer the actual C++ destruction to a safe point in the event loop
+        # rather than leaving it to Python refcounting timing.
+        dialog.deleteLater()
 
     def _on_check_quota(self) -> None:
         """
@@ -521,6 +646,7 @@ class ResultScreen(QWidget):
             self._info_btn.setVisible(False)
             self._copy_btn.setVisible(False)
             self._set_background(None)
+            self._set_preview(None, use_banner=False)
             return
 
         self._card.setVisible(True)
@@ -583,6 +709,8 @@ class ResultScreen(QWidget):
 
         # Background always uses the poster art.
         self._set_background(cover_b64)
+
+        self._set_preview(verdict.get("preview_video_url"), use_banner=use_banner)
 
         # Populate metadata badges for both layouts.
         self._populate_badges(self._badges_row, verdict)
@@ -775,6 +903,36 @@ class ResultScreen(QWidget):
         except Exception:
             self._bg_pixmap = None
             self.update()
+
+    def _set_preview(self, video_url: str | None, use_banner: bool) -> None:
+        """
+        Autoplay trace.moe's preview clip inline over the banner image for a
+        few seconds, muted, then swap back to the banner. 
+
+        The expand button stays available after to replay it full-size.
+
+        Only wired up when the banner layout is active - there's nowhere to
+        show it in the plain cover layout.
+        """
+        self._preview_url = video_url if use_banner else None
+        self._banner_preview_timer.stop()
+        self._preview_expand_btn.setVisible(bool(self._preview_url))
+
+        if not self._preview_url:
+            self._banner_video_widget.setVisible(False)
+            self._banner_video_player.stop()
+            return
+
+        self._resize_banner_video()  # geometry may be stale if this is the first result shown
+        self._banner_audio_output.setMuted(True)
+        self._banner_video_widget.setVisible(True)
+        # setSource() already stops/resets any prior playback internally -
+        # an explicit stop() right before this was redundant and forced the
+        # native Windows media backend through an extra teardown in the same
+        # tick, which could wedge it on a slow/still-buffering network source.
+        self._banner_video_player.setSource(QUrl(self._preview_url))
+        self._banner_video_player.play()
+        # The 4s countdown starts once playback begins (see _on_banner_playback_state_changed).
 
     def _make_stat(self, label: str, value: str, sub: str) -> QFrame:
         frame = QFrame()

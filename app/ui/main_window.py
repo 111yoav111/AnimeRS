@@ -133,10 +133,14 @@ class MainWindow(QMainWindow):
 
     def _on_search_finished(self, verdict: dict) -> None:
         """
-        Worker finished - populate result screen and switch to it.
+        Worker finished - switch to the result screen, then add stuff to it.
+
+        Switching first matters: the result screen's embedded preview clip
+        sizes itself off the banner's real laid-out width, which the
+        QStackedWidget only assigns once a page becomes current. 
         """
-        self._result_screen.show_result(verdict, self._current_filename)
         self.show_screen(1)
+        self._result_screen.show_result(verdict, self._current_filename)
 
     def _on_search_error(self, message: str) -> None:
         """
@@ -175,9 +179,10 @@ class MainWindow(QMainWindow):
     def _on_history_entry_selected(self, verdict: dict, filename: str) -> None:
         """
         User clicked a past search - reopen it on the result screen.
+        Switch first - see _on_search_finished for why.
         """
-        self._result_screen.show_result(verdict, filename)
         self.show_screen(1)
+        self._result_screen.show_result(verdict, filename)
 
     def _on_history_back(self) -> None:
         """
