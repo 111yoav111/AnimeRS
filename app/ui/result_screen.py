@@ -503,14 +503,30 @@ class ResultScreen(QWidget):
         video_widget.setMinimumHeight(220)
         layout.addWidget(video_widget, stretch=1)
 
+        # trace.moe's preview links expire after a while, so an old
+        # history/batch result can fail here even though it played fine
+        # when it was first searched. Shown in place of the video instead
+        # of leaving a blank, stuck-looking player.
+        unavailable_label = QLabel("Preview unavailable\n(the clip link has likely expired)")
+        unavailable_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        unavailable_label.setWordWrap(True)
+        unavailable_label.setStyleSheet(f"color: {theme.TEXT_FAINT}; font-size: {theme.FONT_SM}px;")
+        unavailable_label.setVisible(False)
+        layout.addWidget(unavailable_label, stretch=1)
+
         player = QMediaPlayer(dialog)
         audio = QAudioOutput(dialog)
         player.setAudioOutput(audio)
         player.setVideoOutput(video_widget)
 
+        def _on_dialog_preview_error(*_):
+            player.stop()
+            video_widget.setVisible(False)
+            unavailable_label.setVisible(True)
+
         # Playing it once just stops at the end of the data that was actually received.
         # cant play it loop since the received data will crash the app.
-        player.errorOccurred.connect(lambda *_: player.stop())
+        player.errorOccurred.connect(_on_dialog_preview_error)
         player.setSource(QUrl(self._preview_url))
         player.play()
 
