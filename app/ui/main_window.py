@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -28,6 +29,13 @@ class MainWindow(QMainWindow):
         self._current_filename = ""
         self._worker = None
         self._history_return_index = 0  # screen to restore when leaving history
+        self._batch_queue: list[str] = []  # paths still to search, current one popped off first
+        self._batch_total = 0
+        self._batch_results: list[dict] = []
+        self._batch_frame_overrides: dict = {}
+        # True while the result screen is showing a row opened from the batch
+        # results screen - back then returns to the batch list, not upload.
+        self._result_from_batch = False
 
         root = QWidget()
         root.setObjectName("central")
@@ -63,10 +71,15 @@ class MainWindow(QMainWindow):
         self._upload_screen = UploadScreen()
         self._result_screen = ResultScreen()
         self._history_screen = HistoryScreen()
+        self._batch_screen = HistoryScreen(
+            title="Batch results", empty_text="No results.",
+            collage_background=True, show_filenames=True, batch_actions=True,
+        )
 
         self.stack.addWidget(self._upload_screen)  # index 0
         self.stack.addWidget(self._result_screen)  # index 1
         self.stack.addWidget(self._history_screen)  # index 2
+        self.stack.addWidget(self._batch_screen)  # index 3
 
         root_layout.addWidget(self.stack, stretch=1)
 
@@ -84,11 +97,14 @@ class MainWindow(QMainWindow):
 
         # Signals
         self._upload_screen.search_requested.connect(self._on_search_requested)
+        self._upload_screen.batch_search_requested.connect(self._on_batch_search_requested)
         self._upload_screen.show_history_requested.connect(self._on_show_history)
         self._result_screen.go_back.connect(self._on_go_back)
         self._result_screen.show_history_requested.connect(self._on_show_history)
         self._history_screen.go_back.connect(self._on_history_back)
         self._history_screen.entry_selected.connect(self._on_history_entry_selected)
+        self._batch_screen.go_back.connect(self._on_go_back)
+        self._batch_screen.entry_selected.connect(self._on_batch_entry_selected)
 
     # Slots
 
@@ -139,6 +155,7 @@ class MainWindow(QMainWindow):
         sizes itself off the banner's real laid-out width, which the
         QStackedWidget only assigns once a page becomes current. 
         """
+        self._result_from_batch = False
         self.show_screen(1)
         self._result_screen.show_result(verdict, self._current_filename)
 
@@ -149,10 +166,73 @@ class MainWindow(QMainWindow):
         self._upload_screen.reset()
         QMessageBox.critical(self, "Search failed", message)
 
+    def _on_batch_search_requested(self, paths: list, frame_overrides: dict) -> None:
+        """
+        User dropped/browsed multiple files - search them one at a time
+        and append the result to a list shown when the whole batch is done.
+
+        frame_overrides maps path -> frame count for videos the user
+        customized via the batch frame picker; anything missing uses Auto.
+        """
+        self._batch_queue = list(paths)
+        self._batch_total = len(paths)
+        self._batch_results = []
+        self._batch_frame_overrides = frame_overrides or {}
+        self._run_next_batch_item()
+
+    def _run_next_batch_item(self) -> None:
+        if not self._batch_queue:
+            self._batch_screen.set_entries(self._batch_results)
+            self.show_screen(3)
+            return
+
+        path = self._batch_queue.pop(0)
+        self._current_filename = Path(path).name
+        position = self._batch_total - len(self._batch_queue)  # 1-based index of the item now running
+
+        is_still_image = Path(path).suffix.lower() in _STILL_EXTENSIONS
+        max_frames = self._batch_frame_overrides.get(path)  # None unless the user customized this one
+        display_frames = 1 if is_still_image else max_frames
+        self._upload_screen.start_progress(display_frames, batch_position=(position, self._batch_total))
+
+        self._worker = SearchWorker(file_path=path, max_frames=max_frames)
+        self._worker.finished.connect(self._on_batch_item_finished)
+        self._worker.error.connect(self._on_batch_item_error)
+        self._worker.start()
+
+    def _on_batch_item_finished(self, verdict: dict) -> None:
+        self._batch_results.append({
+            "searched_at": time.time(),
+            "filename": self._current_filename,
+            "verdict": verdict,
+        })
+        self._run_next_batch_item()
+
+    def _on_batch_item_error(self, message: str) -> None:
+        """
+        If one file search failed, mark it as an error row and keep going, scan the rest of the batch.
+        """
+        self._batch_results.append({
+            "searched_at": time.time(),
+            "filename": self._current_filename,
+            "verdict": {"found": False, "error": message},
+        })
+        self._run_next_batch_item()
+
     def _on_go_back(self) -> None:
         """
-        User clicked back / try again - reset and go to upload screen.
+        User clicked back / try again.
+
+        If the result screen is showing a row that was opened from the batch
+        results screen, back returns to the batch list; anywhere else (single
+        search, or the batch screen's own back button) it resets and goes to
+        the upload screen as always.
         """
+        if self._result_from_batch and self.stack.currentIndex() == 1:
+            self._result_from_batch = False
+            self.show_screen(3)
+            return
+        self._result_from_batch = False
         self._upload_screen.reset()
         self.show_screen(0)
 
@@ -181,6 +261,16 @@ class MainWindow(QMainWindow):
         User clicked a past search - reopen it on the result screen.
         Switch first - see _on_search_finished for why.
         """
+        self._result_from_batch = False
+        self.show_screen(1)
+        self._result_screen.show_result(verdict, filename)
+
+    def _on_batch_entry_selected(self, verdict: dict, filename: str) -> None:
+        """
+        User clicked a row on the batch results screen - same as a history
+        row, except back from the result returns to the batch list.
+        """
+        self._result_from_batch = True
         self.show_screen(1)
         self._result_screen.show_result(verdict, filename)
 

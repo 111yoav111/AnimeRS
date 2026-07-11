@@ -4,11 +4,12 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QPushButton, QFileDialog, QProgressBar, QSizePolicy,
-    QDialog, QSpinBox, QGraphicsOpacityEffect
+    QDialog, QSpinBox, QGraphicsOpacityEffect, QMessageBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent, QPainter, QFontMetrics, QPixmap
 
+import config
 from ui import theme
 from ui.background_paint import draw_cover_background, load_pixmap
 from ui.result_screen import _ImageBanner
@@ -82,9 +83,89 @@ class FramePickerDialog(QDialog):
         return self._spinbox.value()
 
 
+class BatchFramePickerDialog(QDialog):
+    """
+    Per-video frame count picker for batch mode - one row per video, each
+    with its own Auto/1-16 spinbox. Stills aren't listed since they're
+    always a single frame.
+    """
+    def __init__(self, video_paths: list[str], current_overrides: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Frame count per video")
+        self.setFixedSize(360, 340)
+        self.setStyleSheet(f"background: {theme.BG_APP}; color: {theme.TEXT_PRIMARY};")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+
+        hint = QLabel("Auto picks a frame count automatically. Set a value to override it for that video.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: {theme.FONT_SM}px;")
+        layout.addWidget(hint)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        list_widget = QWidget()
+        list_layout = QVBoxLayout(list_widget)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        list_layout.setSpacing(8)
+
+        self._spinboxes: dict[str, QSpinBox] = {}
+        for path in video_paths:
+            row = QHBoxLayout()
+
+            filename = Path(path).name
+            name_label = QLabel()
+            metrics = QFontMetrics(name_label.font())
+            name_label.setText(metrics.elidedText(filename, Qt.TextElideMode.ElideMiddle, 190))
+            name_label.setToolTip(filename)
+            name_label.setStyleSheet(f"color: {theme.TEXT_SECONDARY}; font-size: {theme.FONT_SM}px;")
+            row.addWidget(name_label, stretch=1)
+
+            spin = QSpinBox()
+            spin.setRange(0, config.MAX_FRAMES_LIMIT)
+            spin.setSpecialValueText("Auto")
+            spin.setValue(current_overrides.get(path, 0))
+            spin.setFixedWidth(80)
+            spin.setStyleSheet(f"""
+                QSpinBox {{
+                    background: {theme.BG_ELEVATED};
+                    border: 1px solid {theme.BORDER_DEFAULT};
+                    border-radius: {theme.RADIUS_BTN}px;
+                    padding: 4px 8px;
+                    color: {theme.TEXT_PRIMARY};
+                }}
+            """)
+            row.addWidget(spin)
+            self._spinboxes[path] = spin
+
+            list_layout.addLayout(row)
+
+        scroll.setWidget(list_widget)
+        layout.addWidget(scroll, stretch=1)
+
+        confirm_btn = QPushButton("Confirm")
+        confirm_btn.setStyleSheet(theme.browse_btn_style())
+        confirm_btn.clicked.connect(self.accept)
+        layout.addWidget(confirm_btn)
+
+    def overrides(self) -> dict:
+        """
+        Return {path: frame_count} for every video where the user picked a
+        value other than Auto (0).
+        """
+        return {path: spin.value() for path, spin in self._spinboxes.items() if spin.value() != 0}
+
+
 class UploadScreen(QWidget):
     # Emits (file_path, max_frames) — max_frames is None if user didn't set it
     search_requested = pyqtSignal(str, object)
+    # Emits (paths, frame_overrides) - overrides maps path -> frame count for
+    # videos the user customized; anything not in it uses Auto
+    batch_search_requested = pyqtSignal(list, dict)
     # Emits when user clicks "History"
     show_history_requested = pyqtSignal()
 
@@ -93,7 +174,9 @@ class UploadScreen(QWidget):
         self.setAcceptDrops(True)
 
         self._current_path: str = ""
+        self._current_paths: list[str] = []  # set instead of _current_path in batch mode
         self._max_frames: Optional[int] = None  # None = auto
+        self._batch_frame_overrides: dict = {}  # path -> frame count, batch mode only
 
         # The local image for bg, didnt find - fall back to black bg
         self._bg_pixmap = load_pixmap(_BG_IMAGE_PATH)
@@ -467,21 +550,68 @@ class UploadScreen(QWidget):
     def dropEvent(self, event: QDropEvent) -> None:
         self._drop_zone.setStyleSheet(theme.drop_zone_style(hover=False, transparent=True))
         urls = event.mimeData().urls()
-        if urls:
-            self._on_file_picked(urls[0].toLocalFile())
+        paths = [u.toLocalFile() for u in urls if u.isLocalFile()]
+        paths = [p for p in paths if Path(p).suffix.lower() in config.ALLOWED_EXTENSIONS]
+        if paths:
+            self._on_files_picked(paths)
 
     # File picking
 
     def _browse(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select a file", "", _ALLOWED_FORMATS,
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select file(s)", "", _ALLOWED_FORMATS,
         )
-        if path:
-            self._on_file_picked(path)
+        if paths:
+            self._on_files_picked(paths)
+
+    def _on_files_picked(self, paths: list[str]) -> None:
+        """
+        Route a drop/browse selection to the single-file flow (unchanged
+        behavior) or batch mode, depending on how many files came in.
+        """
+        if len(paths) == 1:
+            self._on_file_picked(paths[0])
+            return
+
+        if len(paths) > config.MAX_BATCH_FILES:
+            QMessageBox.information(
+                self, "Too many files",
+                f"Only the first {config.MAX_BATCH_FILES} files will be searched "
+                f"(you selected {len(paths)}).",
+            )
+            paths = paths[:config.MAX_BATCH_FILES]
+
+        self._current_path = ""
+        self._current_paths = paths
+        self._max_frames = None
+        self._batch_frame_overrides = {}
+
+        has_video = any(Path(p).suffix.lower() not in _STILL_EXTENSIONS for p in paths)
+
+        self._set_drop_title(f"{len(paths)} files selected")
+        self._drop_sub.setText("Batch search")
+        self._frames_label.setText("Frames: Auto for all")
+        self._set_video_options_visible(has_video)
+        self._search_btn.setText(f"Search {len(paths)} files")
+        self._search_btn.setVisible(True)
+        self._cancel_btn.setVisible(True)
+        self._reposition_cancel_btn()
+        self._fade_out_divider()
+
+        self._drop_zone.setStyleSheet(theme.drop_zone_style(selected=True, transparent=True))
+        self._upload_preview.setVisible(False)
+        self._upload_preview.set_pixmap(None)
+        self._upload_icon.setVisible(True)
+        self._upload_icon.setPixmap(QPixmap())
+        self._upload_icon.setText("🗂️")
+        self._upload_icon.setStyleSheet(f"color: {theme.ACCENT}; font-size: 28px;")
 
     def _on_paste(self) -> None:
         self._current_path = ""
+        self._current_paths = []
         self._max_frames = None
+        self._batch_frame_overrides = {}
+        self._search_btn.setText("Search")
         self._search_btn.setVisible(True)
         self._set_video_options_visible(False)
         self._cancel_btn.setVisible(True)
@@ -500,7 +630,9 @@ class UploadScreen(QWidget):
         Shows the search button and video options if it's a video.
         """
         self._current_path = path
+        self._current_paths = []
         self._max_frames = None
+        self._batch_frame_overrides = {}
         filename = Path(path).name
         suffix = Path(path).suffix.lower()
         is_video = suffix not in _STILL_EXTENSIONS
@@ -509,6 +641,7 @@ class UploadScreen(QWidget):
         self._drop_sub.setText("Video" if is_video else "Image")
         self._set_video_options_visible(is_video)
         self._frames_label.setText("Frames: Auto")
+        self._search_btn.setText("Search")
         self._search_btn.setVisible(True)
         self._cancel_btn.setVisible(True)
         self._reposition_cancel_btn()
@@ -642,17 +775,33 @@ class UploadScreen(QWidget):
         self._divider_fade.start()
 
     def _open_frame_picker(self) -> None:
+        if self._current_paths:
+            self._open_batch_frame_picker()
+            return
         dialog = FramePickerDialog(self)
         if dialog.exec():
             self._max_frames = dialog.value()
             self._frames_label.setText(f"Frames: {self._max_frames}")
 
+    def _open_batch_frame_picker(self) -> None:
+        videos = [p for p in self._current_paths if Path(p).suffix.lower() not in _STILL_EXTENSIONS]
+        if not videos:
+            return
+        dialog = BatchFramePickerDialog(videos, self._batch_frame_overrides, self)
+        if dialog.exec():
+            self._batch_frame_overrides = dialog.overrides()
+            customized = len(self._batch_frame_overrides)
+            self._frames_label.setText(f"Frames: {customized} customized" if customized else "Frames: Auto for all")
+
     def _on_search(self) -> None:
-        self.search_requested.emit(self._current_path, self._max_frames)
+        if self._current_paths:
+            self.batch_search_requested.emit(self._current_paths, self._batch_frame_overrides)
+        else:
+            self.search_requested.emit(self._current_path, self._max_frames)
 
     # Progress API
 
-    def start_progress(self, total_frames: Optional[int] = None) -> None:
+    def start_progress(self, total_frames: Optional[int] = None, batch_position: Optional[tuple] = None) -> None:
         """
         Analysis has started, so all search/browse controls are hidden and the
         progress display takes the full space. Nothing is actionable until the
@@ -660,6 +809,10 @@ class UploadScreen(QWidget):
 
         total_frames may be None because the backend search is a single
         blocking call and does not stream progress.
+
+        batch_position, if provided, is a 1-based (current, total) tuple. It's
+        shown in the existing progress label (ex "... · File 2 of 5") instead
+        of a separate label to keep the upload layout compact.
 
         Three states are supported:
         - total_frames == 1: a still image, so "Frame 1 of 1" is shown.
@@ -671,20 +824,27 @@ class UploadScreen(QWidget):
         Since progress is not tracked per frame, labels such as "Frame 1 of N"
         are avoided when N > 1.
         """
+        batch_text = f"File {batch_position[0]} of {batch_position[1]}" if batch_position else ""
+
+        def _with_batch(text: str) -> str:
+            if not batch_text:
+                return text
+            return f"{text}  ·  {batch_text}" if text else batch_text
+
         if total_frames == 1:
             self._prog_analyzing.setText("Analyzing frame")
-            self._progress_bar.setRange(0, 0)  
-            self._prog_count.setText("Frame 1 of 1")
+            self._progress_bar.setRange(0, 0)
+            self._prog_count.setText(_with_batch("Frame 1 of 1"))
         elif total_frames and total_frames > 1:
             self._prog_analyzing.setText("Analyzing frames")
-            self._progress_bar.setRange(0, 0)  
-            self._prog_count.setText(f"Analyzing {total_frames} frames")
+            self._progress_bar.setRange(0, 0)
+            self._prog_count.setText(_with_batch(f"Analyzing {total_frames} frames"))
         else:
             # Always use the plural label for videos/GIFs in Auto mode to avoid
             # carrying over the singular from a previous image search.
             self._prog_analyzing.setText("Analyzing frames")
-            self._progress_bar.setRange(0, 0)  
-            self._prog_count.setText("")
+            self._progress_bar.setRange(0, 0)
+            self._prog_count.setText(_with_batch(""))
         self._progress_widget.setVisible(True)
 
         self._run_frame_index = 0
@@ -758,11 +918,14 @@ class UploadScreen(QWidget):
         self._drop_title.setText("Drop your file here")
         self._drop_title.setToolTip("")
         self._drop_sub.setText("Screenshot, GIF, or video clip")
+        self._search_btn.setText("Search")
         self._search_btn.setVisible(False)
         self._set_video_options_visible(False)
         self._cancel_btn.setVisible(False)
         self._fade_in_divider()
         self._current_path = ""
+        self._current_paths = []
+        self._batch_frame_overrides = {}
         self._max_frames = None
 
         # input_controls was stuck at its previous size even after the search
