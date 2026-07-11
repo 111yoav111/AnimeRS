@@ -16,6 +16,9 @@ QUOTA_WARN_EVERY = 10  # tell user every QUOTA_WARN_EVERY searches how many he m
 # Frame
 MAX_FRAMES_LIMIT = 16 # cap on user selected frame count (1-16)
 
+# Batch upload limit - dont burn all searchs at once 
+MAX_BATCH_FILES = 20
+
 # ---------------history------------------
 HISTORY_MAX_ENTRIES = 50  # cap on saved search history entries - oldest trimmed first
 
