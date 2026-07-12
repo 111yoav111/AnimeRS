@@ -177,6 +177,7 @@ class UploadScreen(QWidget):
         self._current_paths: list[str] = []  # set instead of _current_path in batch mode
         self._max_frames: Optional[int] = None  # None = auto
         self._batch_frame_overrides: dict = {}  # path -> frame count, batch mode only
+        self._thumbnail_worker = None
 
         # The local image for bg, didnt find - fall back to black bg
         self._bg_pixmap = load_pixmap(_BG_IMAGE_PATH)
@@ -677,10 +678,15 @@ class UploadScreen(QWidget):
 
     def _start_thumbnail_worker(self, path: str) -> None:
         """
-        Start a background thread to get the videos first frame. 
-        
+        Start a background thread to get the videos first frame.
+
         The emoji fallback is already shown, and will be replaced once the frame is ready.
         """
+        # Wait for the previous thumbnail worker to finish. Destroying a running
+        # QThread crashes the app, and stale thumbnails are ignored when they
+        # eventually complete.
+        if self._thumbnail_worker is not None:
+            self._thumbnail_worker.wait()
         self._thumbnail_worker = ThumbnailWorker(path)
         self._thumbnail_worker.finished.connect(
             lambda jpeg_bytes: self._on_thumbnail_ready(path, jpeg_bytes)

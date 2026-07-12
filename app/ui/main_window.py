@@ -28,6 +28,7 @@ class MainWindow(QMainWindow):
 
         self._current_filename = ""
         self._worker = None
+        self._probe_worker = None
         self._history_return_index = 0  # screen to restore when leaving history
         self._batch_queue: list[str] = []  # paths still to search, current one popped off first
         self._batch_total = 0
@@ -125,6 +126,10 @@ class MainWindow(QMainWindow):
 
         self._upload_screen.start_progress(display_frames)
 
+        # Wait out the previous worker's final thread teardown before
+        # releasing it - see _run_next_batch_item for why.
+        if self._worker is not None:
+            self._worker.wait()
         self._worker = SearchWorker(file_path=path, max_frames=max_frames)
         self._worker.finished.connect(self._on_search_finished)
         self._worker.error.connect(self._on_search_error)
@@ -134,6 +139,8 @@ class MainWindow(QMainWindow):
             # Auto mode for videos/GIFs. Estimate the frame count from the video's
             # duration to improve the progress display. This runs in the background
             # and falls back to the unknown-count state if the estimate fails.
+            if self._probe_worker is not None:
+                self._probe_worker.wait()
             self._probe_worker = ProbeWorker(path)
             self._probe_worker.finished.connect(self._on_probe_done)
             self._probe_worker.start()
@@ -195,6 +202,10 @@ class MainWindow(QMainWindow):
         display_frames = 1 if is_still_image else max_frames
         self._upload_screen.start_progress(display_frames, batch_position=(position, self._batch_total))
 
+        # Wait for the previous worker to finish shutting down before replacing it.
+        # Destroying a QThread that's still exiting can crash the app.
+        if self._worker is not None:
+            self._worker.wait()
         self._worker = SearchWorker(file_path=path, max_frames=max_frames)
         self._worker.finished.connect(self._on_batch_item_finished)
         self._worker.error.connect(self._on_batch_item_error)
