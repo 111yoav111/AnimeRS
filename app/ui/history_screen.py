@@ -145,9 +145,24 @@ class HistoryScreen(QWidget):
         layout.addWidget(scroll, stretch=1)
 
         if batch_actions:
+            # Batch-wide quota notice (session reminder / low-quota warning),
+            # aggregated over the whole batch instead of buried inside one
+            # row's verdict. Space is reserved so showing it doesn't shift
+            # the layout - same treatment as the result screen's notice.
+            layout.addSpacing(10)
+            self._quota_notice = QLabel("")
+            self._quota_notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._quota_notice.setStyleSheet(f"color: {theme.CONFIDENCE_LOW_TEXT}; font-size: {theme.FONT_XS}px;")
+            self._quota_notice.setFixedHeight(18)
+            _sp = self._quota_notice.sizePolicy()
+            _sp.setRetainSizeWhenHidden(True)
+            self._quota_notice.setSizePolicy(_sp)
+            self._quota_notice.setVisible(False)
+            layout.addWidget(self._quota_notice)
+
             # Bottom action, same style and placement as the result screen's
             # "Try another file" - resets and returns to the upload screen.
-            layout.addSpacing(14)
+            layout.addSpacing(4)
             try_more = QPushButton("↺  Try more files")
             try_more.setStyleSheet(theme.try_again_btn_style())
             try_more.clicked.connect(self.go_back.emit)
@@ -168,6 +183,27 @@ class HistoryScreen(QWidget):
         super().paintEvent(event)
 
     # API
+
+    def set_quota_notice(self, text: str | None, is_warning: bool = False) -> None:
+        """
+        Show (or hide, when text is None) the batch-wide quota notice.
+
+        is_warning=True uses the low quota style.
+
+        Only exists in batch_actions mode.
+        """
+        if not self._batch_actions:
+            return
+        if not text:
+            self._quota_notice.setVisible(False)
+            return
+        icon = "⚠" if is_warning else "🔔"
+        weight = " font-weight: 600;" if is_warning else ""
+        self._quota_notice.setText(f"{icon} {text.strip()}")
+        self._quota_notice.setStyleSheet(
+            f"color: {theme.CONFIDENCE_LOW_TEXT}; font-size: {theme.FONT_XS}px;{weight}"
+        )
+        self._quota_notice.setVisible(True)
 
     def set_entries(self, entries: list[dict]) -> None:
         """

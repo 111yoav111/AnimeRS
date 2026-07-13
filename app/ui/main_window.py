@@ -189,7 +189,9 @@ class MainWindow(QMainWindow):
 
     def _run_next_batch_item(self) -> None:
         if not self._batch_queue:
+            notice, is_warning = self._batch_quota_notice()
             self._batch_screen.set_entries(self._batch_results)
+            self._batch_screen.set_quota_notice(notice, is_warning)
             self.show_screen(3)
             return
 
@@ -210,6 +212,43 @@ class MainWindow(QMainWindow):
         self._worker.finished.connect(self._on_batch_item_finished)
         self._worker.error.connect(self._on_batch_item_error)
         self._worker.start()
+
+    def _batch_quota_notice(self) -> tuple:
+        """
+        Build a single quota notice for the batch using the final quota after
+        all searches complete.
+
+        The backend attaches quota messages to individual searches. Move them to
+        the batch results instead and remove the per-search copies so old
+        results don't show outdated messages.
+
+        Returns (text, is_warning). text is None if no notice should be shown.
+        Low-quota warnings take priority over the session reminder.
+        """
+        low_warning = None
+        crossed = False
+        last_reminder = None
+        final_count = 0
+        for entry in self._batch_results:
+            verdict = entry.get("verdict") or {}
+            if verdict.get("quota_low_warning"):
+                low_warning = verdict["quota_low_warning"]
+            if verdict.get("quota_reminder"):
+                crossed = True
+                last_reminder = verdict["quota_reminder"]
+            count = verdict.get("session_search_count")
+            if isinstance(count, int) and count > final_count:
+                final_count = count
+            verdict.pop("quota_reminder", None)
+            verdict.pop("quota_low_warning", None)
+
+        if low_warning:
+            return low_warning, True
+        if crossed:
+            if final_count:
+                return f"You have used {final_count} trace.moe searches this session.", False
+            return last_reminder, False
+        return None, False
 
     def _on_batch_item_finished(self, verdict: dict) -> None:
         self._batch_results.append({

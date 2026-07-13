@@ -54,6 +54,10 @@ def _add_search_counter(result: dict) -> dict:
         before = _search_count
         _search_count += frames_used
         count = _search_count
+    # Always expose the running session total - batch mode uses it to show
+    # one aggregated reminder with the final count after all items finish,
+    # instead of a per-item message buried inside a single row's verdict.
+    result["session_search_count"] = count
     if count // config.QUOTA_WARN_EVERY > before // config.QUOTA_WARN_EVERY:
         result["quota_reminder"] = (
             f"You have used {count} trace.moe searches this session."
