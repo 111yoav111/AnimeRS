@@ -165,7 +165,8 @@ async def search_paste():
     except NotImplementedError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     except RuntimeError as e:
-        return JSONResponse(status_code=502, content={"error": str(e)})
+        # actionable message - 400, not a 502 gateway error.
+        return JSONResponse(status_code=400, content={"error": str(e)})
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Error: {e}"})
     finally:

@@ -224,6 +224,12 @@ class SearchWorker(QThread):
     def _search_paste(self) -> dict:
         with httpx.Client(timeout=_TIMEOUT) as client:
             resp = client.post(f"{_api_base()}/search/paste", headers=_HEADERS)
-            resp.raise_for_status()
+            # clipboard failures, return error
+            if resp.status_code >= 400:
+                try:
+                    detail = resp.json().get("error")
+                except Exception:
+                    detail = None
+                raise RuntimeError(detail or f"Server returned an error: {resp.status_code}")
             return resp.json()
         
