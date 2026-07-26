@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QFrame, QPushButton, QProgressBar, QSizePolicy, QDialog, QScrollArea,
     QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QTimer, QUrl
+from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QSize, QTimer, QUrl
 from PyQt6.QtGui import QPixmap, QPainter, QFont, QFontMetrics, QPainterPath
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
@@ -14,6 +14,11 @@ from PyQt6.QtMultimediaWidgets import QVideoWidget
 from ui import theme
 from ui.background_paint import draw_cover_background
 from ui.search_worker import QuotaWorker
+
+
+# banner hero height - let the text be above the image.
+_BANNER_H = 210
+_BANNER_H_MIN = 150
 
 
 def _clean_anilist_text(text: str | None) -> str:
@@ -39,10 +44,19 @@ class _ImageBanner(QWidget):
     Upload img/gif/vid for displaying the rounded corners.
     """
 
-    def __init__(self, parent=None, corner_radius: int = 0):
+    def __init__(self, parent=None, corner_radius: int = 0, preferred_height: int = 0):
         super().__init__(parent)
         self._pixmap: QPixmap | None = None
         self._corner_radius = corner_radius
+        self._preferred_height = preferred_height
+
+    def sizeHint(self) -> QSize:
+        # preferred (not fixed) height lets the layout hand back space when
+        # the window is short, instead of overlapping the widgets below.
+        hint = super().sizeHint()
+        if self._preferred_height:
+            return QSize(hint.width(), self._preferred_height)
+        return hint
 
     def set_pixmap(self, pixmap: QPixmap | None) -> None:
         self._pixmap = pixmap
@@ -65,6 +79,9 @@ class _ImageBanner(QWidget):
 
 
 class ResultScreen(QWidget):
+    # Budget for the badges row in the banner layout. The title and native title are
+    _badges_budget = 394
+
     # Emits when user clicks back or try again
     go_back = pyqtSignal()
     # Emits when user clicks "History"
@@ -218,9 +235,20 @@ class ResultScreen(QWidget):
         banner_outer.setSpacing(0)
 
         # Image strip, full card width, fixed height
-        self._banner_image = _ImageBanner()
-        self._banner_image.setFixedHeight(150)
+        self._banner_image = _ImageBanner(preferred_height=_BANNER_H)
+        # bottom floor = whatever the overlaid text block needs +  art above it.
+        # so the text can never be pushed off the image.
+        self._banner_image.setMinimumHeight(_BANNER_H_MIN)
+        self._banner_image.setMaximumHeight(_BANNER_H)
         banner_outer.addWidget(self._banner_image)
+
+        # The title/native/badges block is laid out *inside* the image, pinned to
+        # its bottom edge, so the text sits on the artwork. A stretch above it
+        # does the pinning - no absolute positioning, so it survives resizes.
+        self._banner_image_layout = QVBoxLayout(self._banner_image)
+        self._banner_image_layout.setContentsMargins(0, 0, 0, 0)
+        self._banner_image_layout.setSpacing(0)
+        self._banner_image_layout.addStretch(1)
 
         # Inline preview clip - overlays the banner image, autoplays muted
         # for a few seconds, then hides itself and show banner instead.
@@ -290,6 +318,16 @@ class ResultScreen(QWidget):
 
         # Title + native title + season/episode/timestamp/year badges, below the image
         banner_meta = QWidget()
+        banner_meta.setObjectName("banner_meta")
+        # add a background to text so it will be readable always
+        banner_meta.setStyleSheet("""
+            QWidget#banner_meta {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(13, 13, 15, 0),
+                    stop:0.35 rgba(13, 13, 15, 165),
+                    stop:1 rgba(13, 13, 15, 230));
+            }
+        """)
         banner_meta_layout = QVBoxLayout(banner_meta)
         banner_meta_layout.setContentsMargins(18, 14, 18, 18)
         banner_meta_layout.setSpacing(0)
@@ -318,7 +356,11 @@ class ResultScreen(QWidget):
         self._banner_badges_row.setAlignment(Qt.AlignmentFlag.AlignLeft)
         banner_meta_layout.addLayout(self._banner_badges_row)
 
-        banner_outer.addWidget(banner_meta)
+        self._banner_image_layout.addWidget(banner_meta)
+        self._banner_meta = banner_meta
+        # Created after the video widget, so it already stacks above it; make
+        # that explicit so the preview clip never covers the title.
+        self._banner_meta.raise_()
         card_layout.addWidget(self._hero_banner)
 
         # Stats section
@@ -433,6 +475,7 @@ class ResultScreen(QWidget):
 
     def _resize_banner_video(self) -> None:
         self._banner_video_widget.setGeometry(0, 0, self._banner_image.width(), self._banner_image.height())
+        self._banner_meta.raise_()  # video is a sibling covering the whole image
         margin = 12
         x = self._banner_image.width() - self._preview_expand_btn.width() - margin
         self._preview_expand_btn.move(max(0, x), margin)
@@ -830,7 +873,7 @@ class ResultScreen(QWidget):
 
         chosen_px = min_px
         for px in range(max_px, min_px - 1, -1):
-            font = QFont()
+            font = QFont(label.font())
             font.setPixelSize(px)
             # safty buffer
             if QFontMetrics(font).horizontalAdvance(text) <= available_width - 6:
@@ -859,6 +902,8 @@ class ResultScreen(QWidget):
         def _add(badge: QLabel) -> None:
             # Keep badges at their intended size. This prevents Qt from shrinking
             # them when the window becomes crowded by other stuff.
+            badge.ensurePolished()  # apply the stylesheet padding BEFORE measuring
+            badge.setMinimumSize(badge.sizeHint())
             badge.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             row.addWidget(badge)
 
@@ -886,13 +931,36 @@ class ResultScreen(QWidget):
             badge.setStyleSheet(theme.badge_range_style())
             _add(badge)
 
-        # Year - same row as the others, but pushed to right 
+        # Build the year badge first so its real width can be reserved.
         year = verdict.get("year")
+        year_badge = None
         if year:
+            year_badge = QLabel(str(year))
+            year_badge.setStyleSheet(theme.year_badge_style())
+            year_badge.ensurePolished()
+
+        # check the badges row is good, and if not, elide the widest one to fit.
+        widgets = [row.itemAt(i).widget() for i in range(row.count())]
+        widgets = [w for w in widgets if w is not None]
+        if widgets:
+            reserved = (year_badge.sizeHint().width() + 6) if year_badge else 0
+            budget = self._badges_budget - reserved
+            used = sum(w.sizeHint().width() for w in widgets) + 6 * (len(widgets) - 1)
+            if used > budget:
+                widest = max(widgets, key=lambda w: w.sizeHint().width())
+                full_text = widest.text()
+                allowed = widest.sizeHint().width() - (used - budget)
+                if allowed > 48:
+                    widest.setMinimumSize(0, 0)  # unpin before re-measuring
+                    fm = QFontMetrics(widest.font())
+                    # maybe 22px of the badge width is padding + border, not text.
+                    widest.setText(fm.elidedText(full_text, Qt.TextElideMode.ElideRight, allowed - 22))
+                    widest.setToolTip(full_text)
+                    widest.setMinimumSize(widest.sizeHint())
+
+        if year_badge is not None:
             row.addStretch()
-            badge = QLabel(str(year))
-            badge.setStyleSheet(theme.year_badge_style())
-            _add(badge)
+            _add(year_badge)
 
     def _set_background(self, cover_image_b64: str | None) -> None:
         """
@@ -983,3 +1051,4 @@ class ResultScreen(QWidget):
     def _update_stat(self, frame: QFrame, value: str, sub: str) -> None:
         frame.findChild(QLabel, "stat_value").setText(value)
         frame.findChild(QLabel, "stat_sub").setText(sub)
+        
