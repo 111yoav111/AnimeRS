@@ -1,15 +1,12 @@
 <div align="center">
 
-<img src="app/ui/assets/app_icon.png" width="176" alt="AnimeRS logo"/>
+<img src="app/ui/assets/app_icon.png" width="210" alt="AnimeRS logo"/>
 
 # AnimeRS
 ### *Anime Reverse Searcher*
 
 **Seen a cool anime scene but no idea where it's from? Drop it here.**
 
-AnimeRS finds the anime, season, episode, and exact moment the scene appears.
-
-[![Windows](https://img.shields.io/badge/Windows-download_.exe-0078D6?logo=windows&logoColor=white)](../../releases/latest)
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](#-run-from-source-windows--macos--linux)
 [![Made with PyQt6](https://img.shields.io/badge/UI-PyQt6-41CD52?logo=qt&logoColor=white)](#)
 [![Made with FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](#)
@@ -21,8 +18,6 @@ AnimeRS finds the anime, season, episode, and exact moment the scene appears.
 
 
 ---
-## 🎥 Demo
-<img width="480" height="620" alt="AnimeRS_demo" src="https://github.com/user-attachments/assets/60b60a8c-ccb5-4cf8-85d3-a27d5c652b63" />
 
 ## ✨ What it does
 
