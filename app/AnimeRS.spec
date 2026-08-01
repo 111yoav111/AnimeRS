@@ -43,5 +43,5 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,   # no black console window. Flip to True to debug a broken build.
-    icon='app_icon.ico',
+    icon='app/ui/app_icon.png',
 )
