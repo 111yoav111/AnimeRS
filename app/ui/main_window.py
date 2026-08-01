@@ -3,16 +3,16 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QStackedWidget,
-    QHBoxLayout, QVBoxLayout, QLabel, QMessageBox
+    QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QMessageBox
 )
 from PyQt6.QtCore import Qt
 
 import frame_extractor
 from ui.theme import (
-    BG_APP, DOT_RED, DOT_YELLOW, DOT_GREEN,
     WINDOW_WIDTH, WINDOW_HEIGHT,
-    titlebar_style, app_style, credit_style,
+    titlebar_style, app_style, about_btn_style,
 )
+from ui.about_dialog import AboutDialog
 from ui.upload_screen import UploadScreen, _STILL_EXTENSIONS
 from ui.result_screen import ResultScreen
 from ui.history_screen import HistoryScreen
@@ -56,6 +56,14 @@ class MainWindow(QMainWindow):
         tb_layout.setContentsMargins(16, 0, 16, 0)
         tb_layout.setSpacing(8)
 
+        about_btn = QPushButton("i")
+        about_btn.setFixedSize(18, 18)
+        about_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        about_btn.setToolTip("About AnimeRS")
+        about_btn.setStyleSheet(about_btn_style())
+        about_btn.clicked.connect(self._on_show_about)
+        tb_layout.addWidget(about_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+
         tb_layout.addStretch()
 
         title_label = QLabel("AnimeRS")
@@ -63,6 +71,11 @@ class MainWindow(QMainWindow):
         tb_layout.addWidget(title_label)
 
         tb_layout.addStretch()
+
+        # Keeps the title centred despite the about button on the left.
+        spacer = QWidget()
+        spacer.setFixedWidth(about_btn.width())
+        tb_layout.addWidget(spacer)
 
         root_layout.addWidget(titlebar)
 
@@ -84,18 +97,6 @@ class MainWindow(QMainWindow):
 
         root_layout.addWidget(self.stack, stretch=1)
 
-        # Dev by
-        credit_bar = QWidget()
-        credit_bar.setStyleSheet(f"background: {BG_APP};")
-        credit_layout = QHBoxLayout(credit_bar)
-        credit_layout.setContentsMargins(16, 6, 16, 10)
-
-        credit_label = QLabel("Developed by 111yoav111")
-        credit_label.setStyleSheet(credit_style())
-        credit_layout.addWidget(credit_label, alignment=Qt.AlignmentFlag.AlignLeft)
-
-        root_layout.addWidget(credit_bar)
-
         # Signals
         self._upload_screen.search_requested.connect(self._on_search_requested)
         self._upload_screen.batch_search_requested.connect(self._on_batch_search_requested)
@@ -108,6 +109,13 @@ class MainWindow(QMainWindow):
         self._batch_screen.entry_selected.connect(self._on_batch_entry_selected)
 
     # Slots
+
+    def _on_show_about(self) -> None:
+        """
+        User clicked the info button in the titlebar
+        """
+        dialog = AboutDialog(self)
+        dialog.exec()
 
     def _on_search_requested(self, path: str, max_frames) -> None:
         """

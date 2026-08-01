@@ -370,11 +370,20 @@ def history_btn_style() -> str:
         }}
     """
 
-def credit_style() -> str:
+def about_btn_style() -> str:
     return f"""
-        QLabel {{
-            color: {TEXT_DEV};
-            font-size: {FONT_SM}px;
+        QPushButton {{
+            background: none;
+            border: 1px solid {BORDER_DEFAULT};
+            border-radius: 9px;
+            color: {TEXT_GHOST};
+            font-size: {FONT_XS}px;
+            font-weight: 700;
+            font-style: italic;
+        }}
+        QPushButton:hover {{
+            border: 1px solid {ACCENT};
+            color: {ACCENT};
         }}
     """
 
