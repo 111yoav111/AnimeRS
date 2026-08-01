@@ -51,8 +51,6 @@ python main.py
 
 That's it — the app launches its own local backend automatically.
 
-> 🐧 **Linux note:** Everything works except the *paste from clipboard* button (not supported yet) - just drop or browse for the file instead.
-
 ## 🙏 Credits
 
 - [**trace.moe**](https://trace.moe) by [**soruly**](https://github.com/soruly) — the incredible anime scene search engine doing the heavy lifting
