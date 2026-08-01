@@ -7,8 +7,6 @@
 #   - imageio_ffmpeg ships the actual ffmpeg binary inside the package
 #   - imageio loads its format plugins at runtime
 #   - uvicorn imports its loop/protocol/logging classes by string name
-import sys
-
 from PyInstaller.utils.hooks import collect_all
 
 datas = [('ui/assets', 'ui/assets')]  # app icon + any other bundled images
@@ -97,7 +95,7 @@ exe = EXE(
     [],
     name='AnimeRS',
     debug=False,
-    strip=sys.platform != 'win32',  # Windows has no strip utility
+    strip=False,
     upx=False,
     console=False,   # no black console window. Flip to True to debug a broken build.
     icon='ui/assets/app_icon.png',
