@@ -126,6 +126,43 @@ def _grab_linux() -> bytes:
     return _to_png_bytes(img)
 
 
+def grab_qt_image() -> Path:
+    """
+    Grab the clipboard image with Qt and save it as a temp PNG.
+
+    Must be called from the GUI thread since QClipboard isn't thread-safe.
+    Unlike the backend's grab() method, this requires no external tools,
+    so it works on Wayland/X11 without wl-clipboard or xclip.
+
+    The image is saved as "Clipboard image.png" in a temporary directory,
+    which the caller is responsible for deleting.
+    """
+    from PyQt6.QtCore import QBuffer, QByteArray
+    from PyQt6.QtGui import QGuiApplication
+
+    clipboard = QGuiApplication.clipboard()
+    image = clipboard.image() if clipboard is not None else None
+    if image is None or image.isNull():
+        raise RuntimeError("No image in the clipboard. Copy an image first (not a file or text).")
+
+    data = QByteArray()
+    buffer = QBuffer(data)
+    buffer.open(QBuffer.OpenModeFlag.WriteOnly)
+    saved = image.save(buffer, "PNG")
+    buffer.close()
+    if not saved or data.isEmpty():
+        raise RuntimeError("The clipboard image could not be read.")
+
+    img_bytes = bytes(data)
+    _verify(img_bytes)
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="AnimeRS_paste_"))
+    tmp_path = tmp_dir / "Clipboard image.png"
+    tmp_path.write_bytes(img_bytes)
+
+    return tmp_path
+
+
 def grab() -> Path:
     """
     Grab the current clipboard image (the ctrl+v one), return a path to temp PNG file.

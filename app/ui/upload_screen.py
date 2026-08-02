@@ -1,3 +1,5 @@
+import platform
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +12,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QTime
 from PyQt6.QtGui import QKeySequence, QShortcut, QDragEnterEvent, QDropEvent, QPainter, QFontMetrics, QPixmap
 
 import config
+import paste
 from ui import theme
 from ui.background_paint import draw_cover_background, load_pixmap
 from ui.result_screen import _ImageBanner
@@ -38,6 +41,8 @@ _ALLOWED_FORMATS = "Media files (*.jpg *.jpeg *.png *.webp *.bmp *.tiff *.tif *.
 _STILL_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif",
 }
+
+_LINUX_USER = platform.system() == "Linux"  # W
 
 
 class FramePickerDialog(QDialog):
@@ -178,6 +183,7 @@ class UploadScreen(QWidget):
         self._max_frames: Optional[int] = None  # None = auto
         self._batch_frame_overrides: dict = {}  # path -> frame count, batch mode only
         self._thumbnail_worker = None
+        self._paste_temp_dir: Optional[Path] = None  # holds the last pasted image, Linux only
 
         # The local image for bg, didnt find - fall back to black bg
         self._bg_pixmap = load_pixmap(_BG_IMAGE_PATH)
@@ -607,8 +613,31 @@ class UploadScreen(QWidget):
         self._upload_icon.setText("🗂️")
         self._upload_icon.setStyleSheet(f"color: {theme.ACCENT}; font-size: 28px;")
 
+    def _clear_paste_temp(self) -> None:
+        """
+        Delete the temp directory holding the last pasted image, if any.
+        """
+        if self._paste_temp_dir is not None:
+            shutil.rmtree(self._paste_temp_dir, ignore_errors=True)
+            self._paste_temp_dir = None
+
     def _on_paste(self) -> None:
-        self._current_path = ""
+        self._clear_paste_temp()
+
+        pasted_path = ""
+        if _LINUX_USER:
+            # On Linux, read the clipboard in Qt instead of using the backend's
+            # paste endpoint, avoiding wl-paste/xclip dependencies.
+            # Windows and macOS continue using the backend path.
+            try:
+                pasted = paste.grab_qt_image()
+            except RuntimeError as e:
+                QMessageBox.warning(self, "Nothing to paste", str(e))
+                return
+            self._paste_temp_dir = pasted.parent
+            pasted_path = str(pasted)
+
+        self._current_path = pasted_path
         self._current_paths = []
         self._max_frames = None
         self._batch_frame_overrides = {}
@@ -910,6 +939,7 @@ class UploadScreen(QWidget):
         self._prog_count.setText(f"Frame {min(frame_index + 1, total_frames)} of {total_frames}")
 
     def reset(self) -> None:
+        self._clear_paste_temp()
         self._progress_widget.setVisible(False)
         self._progress_bar.setValue(0)
         self._walk_timer.stop()

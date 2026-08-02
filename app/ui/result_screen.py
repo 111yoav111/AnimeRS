@@ -20,6 +20,8 @@ from ui.search_worker import QuotaWorker
 _BANNER_H = 210
 _BANNER_H_MIN = 150
 
+_STAT_INNER_WIDTH = 100  # used for the very start, before the stats row set up
+
 
 def _clean_anilist_text(text: str | None) -> str:
     """
@@ -253,6 +255,7 @@ class ResultScreen(QWidget):
         # Inline preview clip - overlays the banner image, autoplays muted
         # for a few seconds, then hides itself and show banner instead.
         self._preview_url: str | None = None
+        self._preview_retried = False  # one retry per result
         self._banner_video_widget = QVideoWidget(self._banner_image)
         self._banner_video_widget.setVisible(False)
 
@@ -496,11 +499,23 @@ class ResultScreen(QWidget):
 
     def _on_banner_playback_state_changed(self, state) -> None:
         """
-        Start the swap to banner countdown only once playback has actually
-        reached PlayingState - not when requested.
+        Show the clip and start the swap to banner countdown only once
+        playback has actually reached PlayingState - not when requested.
+
+        Showing the widget here rather than in _set_preview keeps the banner
+        image on screen while a network clip buffers.
         """
-        if state == QMediaPlayer.PlaybackState.PlayingState and self._banner_video_widget.isVisible():
-            self._banner_preview_timer.start(4000)
+        if state != QMediaPlayer.PlaybackState.PlayingState:
+            return
+        if not self._preview_url or not self._hero_banner.isVisible():
+            return  # result changed (or went away) while the clip was loading
+
+        self._resize_banner_video()
+        self._banner_video_widget.setVisible(True)
+        # The video widget is a sibling of these ones, so it would cover them.
+        self._info_btn.raise_()
+        self._preview_expand_btn.raise_()
+        self._banner_preview_timer.start(4000)
 
     def _on_banner_preview_timeout(self) -> None:
         """
@@ -512,13 +527,28 @@ class ResultScreen(QWidget):
 
     def _on_banner_preview_error(self, error, error_string) -> None:
         """
-        The preview stream failed to load (dead link, network hiccup, etc.) -
-        fall back to the static banner instead of a broken black box.
+        The preview stream failed to load (dead link, network hiccup, or
+        trace.moe still cutting the clip) - fall back to the static banner
+        instead of a broken black box, then give it one retry a moment later.
         """
         self._banner_preview_timer.stop()
         self._banner_video_widget.setVisible(False)
         self._banner_video_player.stop()
-        self._preview_expand_btn.setVisible(False)
+
+        if self._preview_url and not self._preview_retried:
+            self._preview_retried = True
+            QTimer.singleShot(900, lambda url=self._preview_url: self._retry_banner_preview(url))
+
+    def _retry_banner_preview(self, url: str) -> None:
+        """
+        Second (and last) attempt at the inline preview, skipped if a
+        different result is on screen by now.
+        """
+        if self._preview_url != url or not self._hero_banner.isVisible():
+            return
+        self._banner_video_player.setSource(QUrl())  # see _set_preview
+        self._banner_video_player.setSource(QUrl(url))
+        self._banner_video_player.play()
 
     def _on_open_preview_dialog(self) -> None:
         """
@@ -1009,11 +1039,16 @@ class ResultScreen(QWidget):
 
         self._resize_banner_video()  # geometry may be stale if this is the first result shown
         self._banner_audio_output.setMuted(True)
-        self._banner_video_widget.setVisible(True)
-        # setSource() already stops/resets any prior playback internally -
-        # an explicit stop() right before this was redundant and forced the
-        # native Windows media backend through an extra teardown in the same
-        # tick, which could wedge it on a slow/still-buffering network source.
+        self._preview_retried = False
+        # Keep the video hidden until playback starts to avoid a black placeholder
+        # while the clip is buffering.
+        self._banner_video_widget.setVisible(False)
+
+        # Reset the media source before loading the clip. Qt's FFmpeg backend can
+        # fail when reusing the same URL ("Demuxing failed"), so clearing the source
+        # forces a fresh load. No explicit stop() is needed since setSource() already
+        # resets playback.
+        self._banner_video_player.setSource(QUrl())
         self._banner_video_player.setSource(QUrl(self._preview_url))
         self._banner_video_player.play()
         # The 4s countdown starts once playback begins (see _on_banner_playback_state_changed).
@@ -1048,7 +1083,36 @@ class ResultScreen(QWidget):
 
         return frame
 
+    def _fitted_px(self, text: str, available_width: int, max_px: int, min_px: int) -> int:
+        """
+        Largest pixel size, at most max_px, that fits text in available_width.
+        """
+        for px in range(max_px, min_px - 1, -1):
+            font = QFont(self.font())
+            font.setPixelSize(px)
+            if QFontMetrics(font).horizontalAdvance(text) <= available_width:
+                return px
+        return min_px
+
     def _update_stat(self, frame: QFrame, value: str, sub: str) -> None:
-        frame.findChild(QLabel, "stat_value").setText(value)
-        frame.findChild(QLabel, "stat_sub").setText(sub)
+        """
+        Fill a stat box, shrinking the text if it would be cut off - the boxes
+        are a fixed third of the card each, and "Video clip" or
+        "avg across frames" are both wider than that at the default size.
+        """
+        inner_width = frame.width() - 24  # the box's 12px side margins
+        if inner_width < 60:
+            inner_width = _STAT_INNER_WIDTH  # first result, row not laid out yet
+
+        value_label = frame.findChild(QLabel, "stat_value")
+        value_label.setText(value)
+        value_px = self._fitted_px(value, inner_width, theme.FONT_LG, 12)
+        value_label.setStyleSheet(
+            f"color: {theme.TEXT_SECONDARY}; font-size: {value_px}px; font-weight: 500;"
+        )
+
+        sub_label = frame.findChild(QLabel, "stat_sub")
+        sub_label.setText(sub)
+        sub_px = self._fitted_px(sub, inner_width, theme.FONT_XS, 9)
+        sub_label.setStyleSheet(f"color: {theme.TEXT_DEEP}; font-size: {sub_px}px;")
         
