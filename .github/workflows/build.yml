@@ -17,11 +17,12 @@ jobs:
           - os: windows-latest
             label: Windows (x64)
             artifact: AnimeRS-windows-x64
-          # Only Apple Silicon: the free macOS runners are all arm64 now, and
-          # an Intel build would need a paid -large runner.
           - os: macos-latest
             label: macOS (Apple Silicon)
             artifact: AnimeRS-macos-arm64
+          - os: macos-15-intel
+            label: macOS (Intel)
+            artifact: AnimeRS-macos-x86_64
           - os: ubuntu-22.04     # oldest supported glibc - binaries built on
             label: Linux (x64)   # newer Ubuntu won't run on older distros
             artifact: AnimeRS-linux-x86_64
